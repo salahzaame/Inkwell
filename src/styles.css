@@ -1,0 +1,39 @@
+html, body, #root { margin: 0; padding: 0; height: 100%; }
+body { background: #17181c; font-family: 'Instrument Sans', system-ui, sans-serif; color: #dadde5; }
+* { box-sizing: border-box; }
+
+::-webkit-scrollbar { width: 9px; height: 9px; }
+::-webkit-scrollbar-thumb { background: #2c2f37; border-radius: 5px; border: 2px solid #17181c; }
+::-webkit-scrollbar-track { background: transparent; }
+::selection { background: color-mix(in oklab, var(--acc, #a78bfa) 30%, transparent); }
+
+input, textarea { font-family: 'Instrument Sans', system-ui, sans-serif; }
+[contenteditable] { outline: none; }
+
+@keyframes fadeUp { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+@keyframes popIn { from { opacity: 0; transform: scale(.97); } to { opacity: 1; transform: scale(1); } }
+@keyframes blinkDot { 0%, 80%, 100% { opacity: .25; } 40% { opacity: 1; } }
+@keyframes floatY { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-6px); } }
+
+/* hover states (inline styles carry the base values, so hovers need !important) */
+.hv-item:hover { background: #22242b !important; }
+.hv-item-lit:hover { background: #22242b !important; color: #dadde5 !important; }
+.hv-close:hover { background: #2c2f37 !important; color: #dadde5 !important; }
+.hv-tool:hover { background: #262932 !important; }
+.hv-danger:hover { background: #262932 !important; color: #f87171 !important; }
+.hv-card:hover { border-color: #3a3e48 !important; }
+.hv-bright:hover { filter: brightness(1.1); }
+.hv-chip:hover { border-color: var(--acc) !important; color: var(--acc) !important; }
+.hv-result:hover { background: #26292f !important; }
+.hv-btn:hover { background: #2c2f37 !important; }
+.hv-fade { opacity: .55; transition: opacity .15s; }
+.hv-fade:hover { opacity: 1; }
+.g-node { transition: transform .15s ease; }
+.g-node:hover { transform: translate(-50%, -50%) scale(1.12) !important; }
+
+/* file-tree delete button, revealed on row hover */
+.tree-del { opacity: 0; transition: opacity .12s; }
+.tree-row:hover .tree-del { opacity: 1; }
+.tree-del:hover { background: #2c2f37; color: #f87171 !important; }
+
+textarea::placeholder { color: #4a4f5c; }

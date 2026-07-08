@@ -1,0 +1,811 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=Gochi+Hand&display=swap" rel="stylesheet">
+<style>
+html,body{margin:0;padding:0;height:100%;background:#17181c;font-family:'Instrument Sans',system-ui,sans-serif;color:#dadde5;}
+a{color:#a78bfa;text-decoration:none;} a:hover{color:#c4b5fd;text-decoration:underline;}
+*{box-sizing:border-box;}
+::-webkit-scrollbar{width:9px;height:9px;} ::-webkit-scrollbar-thumb{background:#2c2f37;border-radius:5px;border:2px solid #17181c;} ::-webkit-scrollbar-track{background:transparent;}
+::selection{background:rgba(167,139,250,.3);}
+input,textarea{font-family:'Instrument Sans',system-ui,sans-serif;}
+@keyframes fadeUp{from{opacity:0;transform:translateY(6px);}to{opacity:1;transform:none;}}
+@keyframes popIn{from{opacity:0;transform:scale(.97);}to{opacity:1;transform:scale(1);}}
+@keyframes blinkDot{0%,80%,100%{opacity:.25;}40%{opacity:1;}}
+@keyframes floatY{0%,100%{transform:translateY(0);}50%{transform:translateY(-6px);}}
+</style>
+</helmet>
+
+<div ref="{{ rootRef }}" data-screen-label="Inkwell app" style="display:flex; flex-direction:column; height:100vh; overflow:hidden; background:#17181c; --acc:#a78bfa;">
+<div style="display:flex; flex:1; min-height:0;">
+
+  <!-- ══ Icon rail ══ -->
+  <div style="width:46px; background:#141518; border-right:1px solid #23252b; display:flex; flex-direction:column; align-items:center; padding:10px 0; gap:4px; flex-shrink:0;">
+    <div style="width:30px; height:30px; margin-bottom:8px; border-radius:8px; background:color-mix(in oklab, var(--acc) 16%, transparent); display:flex; align-items:center; justify-content:center;">
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" style="stroke:var(--acc); stroke-width:1.9; stroke-linecap:round; stroke-linejoin:round;"><path d="M3 21l3.5-1L20 6.5a2.12 2.12 0 0 0-3-3L3.5 17z"></path><path d="M14 5.5l4.5 4.5"></path></svg>
+    </div>
+    <div onClick="{{ railFiles }}" title="Files" style="{{ rail.files }}" style-hover="background:#22242b;">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7c0-1.1.9-2 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path></svg>
+    </div>
+    <div onClick="{{ railSearch }}" title="Quick switcher  ⌘K" style="{{ rail.search }}" style-hover="background:#22242b;">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="11" cy="11" r="7"></circle><path d="M16.5 16.5L21 21"></path></svg>
+    </div>
+    <div onClick="{{ railGraph }}" title="Graph view" style="{{ rail.graph }}" style-hover="background:#22242b;">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="6" cy="6" r="2.4"></circle><circle cx="18" cy="8" r="2.4"></circle><circle cx="12" cy="18" r="2.4"></circle><path d="M8.2 7l7.4.8M7 8.1l4 7.8M16.8 10l-3.6 6"></path></svg>
+    </div>
+    <div onClick="{{ railSlides }}" title="Slides" style="{{ rail.slides }}" style-hover="background:#22242b;">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="2"></rect><path d="M12 16v3M8 21h8"></path></svg>
+    </div>
+    <div onClick="{{ railAI }}" title="Assistant" style="{{ rail.ai }}" style-hover="background:#22242b;">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 3l1.9 5.4L19.5 10l-5.6 1.9L12 17.5l-1.9-5.6L4.5 10l5.6-1.6zM19 15l.9 2.4 2.4.9-2.4.9L19 21.5l-.9-2.3-2.4-.9 2.4-.9z"></path></svg>
+    </div>
+    <div style="flex:1;"></div>
+    <div onClick="{{ railSettings }}" title="Settings" style="{{ rail.settings }}" style-hover="background:#22242b;">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"></path><circle cx="9" cy="7" r="2" fill="#141518"></circle><circle cx="15" cy="12" r="2" fill="#141518"></circle><circle cx="7" cy="17" r="2" fill="#141518"></circle></svg>
+    </div>
+  </div>
+
+  <!-- ══ Sidebar : file tree ══ -->
+  <sc-if value="{{ sidebarOpen }}" hint-placeholder-val="{{ true }}">
+  <div data-screen-label="File tree" style="width:228px; background:#191b1f; border-right:1px solid #23252b; display:flex; flex-direction:column; flex-shrink:0;">
+    <div style="display:flex; align-items:center; justify-content:space-between; padding:12px 12px 8px 14px;">
+      <div style="font-size:12px; font-weight:600; letter-spacing:.4px; color:#8b90a0; text-transform:uppercase;">Inkwell vault</div>
+      <div title="New note" style="width:22px; height:22px; border-radius:6px; display:flex; align-items:center; justify-content:center; color:#8b90a0; cursor:pointer;" style-hover="background:#22242b; color:#dadde5;">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"></path></svg>
+      </div>
+    </div>
+    <div style="flex:1; overflow-y:auto; padding:2px 8px 12px;">
+      <sc-for list="{{ tree }}" as="f" hint-placeholder-count="6">
+        <div onClick="{{ openFile }}" data-fid="{{ f.id }}" style="{{ f.style }}" style-hover="background:#22242b;">
+          <span style="width:14px; display:inline-flex; justify-content:center; color:#5b6170; font-size:9px; flex-shrink:0;">{{ f.chev }}</span>
+          <span style="{{ f.iconStyle }}">
+            <sc-if value="{{ f.isFolder }}" hint-placeholder-val="{{ false }}"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="M3 7c0-1.1.9-2 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path></svg></sc-if>
+            <sc-if value="{{ f.isNote }}" hint-placeholder-val="{{ true }}"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h9l4 4v14H6z"></path><path d="M14 3v5h5"></path></svg></sc-if>
+          </span>
+          <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">{{ f.name }}</span>
+        </div>
+      </sc-for>
+    </div>
+    <div style="padding:10px 14px; border-top:1px solid #23252b; font-size:11px; color:#5b6170; display:flex; align-items:center; gap:6px;">
+      <span style="width:6px; height:6px; border-radius:50%; background:#34d399; display:inline-block;"></span>
+      8 notes · local only
+    </div>
+  </div>
+  </sc-if>
+
+  <!-- ══ Main column ══ -->
+  <div style="flex:1; min-width:0; display:flex; flex-direction:column; background:#1e2025;">
+
+    <!-- Tab bar -->
+    <div style="display:flex; align-items:center; gap:2px; padding:6px 10px 0; background:#191b1f; border-bottom:1px solid #23252b;">
+      <sc-for list="{{ tabs }}" as="t" hint-placeholder-count="2">
+        <div onClick="{{ clickTab }}" data-fid="{{ t.id }}" style="{{ t.style }}">
+          <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:160px;">{{ t.name }}</span>
+          <span onClick="{{ closeTab }}" data-fid="{{ t.id }}" style="width:16px; height:16px; border-radius:4px; display:inline-flex; align-items:center; justify-content:center; color:#5b6170; flex-shrink:0;" style-hover="background:#2c2f37; color:#dadde5;">
+            <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M5 5l14 14M19 5L5 19"></path></svg>
+          </span>
+        </div>
+      </sc-for>
+    </div>
+
+    <!-- ── EDITOR VIEW ── -->
+    <sc-if value="{{ showEditor }}" hint-placeholder-val="{{ true }}">
+    <div data-screen-label="Note editor" style="flex:1; overflow-y:auto; min-height:0;">
+      <div style="max-width:700px; margin:0 auto; padding:36px 40px 120px;">
+        <div style="font-size:12px; color:#5b6170; margin-bottom:14px;">Projects <span style="margin:0 4px;">/</span> <span style="color:#8b90a0;">Brain–Computer UI</span></div>
+        <h1 contentEditable="{{ true }}" suppressContentEditableWarning="{{ true }}" style="font-size:34px; font-weight:700; margin:0 0 10px; letter-spacing:-.02em; outline:none;">Brain–Computer UI</h1>
+        <div style="display:flex; align-items:center; gap:8px; margin-bottom:26px; font-size:12.5px;">
+          <span style="background:color-mix(in oklab, var(--acc) 14%, transparent); color:var(--acc); padding:2px 8px; border-radius:99px;">#bci</span>
+          <span style="background:color-mix(in oklab, var(--acc) 14%, transparent); color:var(--acc); padding:2px 8px; border-radius:99px;">#design</span>
+          <span style="color:#5b6170;">edited today · Jul 6, 2026</span>
+        </div>
+
+        <p contentEditable="{{ true }}" suppressContentEditableWarning="{{ true }}" style="font-size:15.5px; line-height:1.75; color:#c3c7d1; margin:0 0 22px; outline:none;">Prototype for a cursor you steer by thought. The headband streams EEG to an on-device decoder — background reading in <a href="#" onClick="{{ openLink }}" data-fid="neural" style="color:var(--acc); border-bottom:1px solid color-mix(in oklab, var(--acc) 40%, transparent); text-decoration:none;">[[Neural Interfaces]]</a>. Target: thought → action in under 90ms, or it feels laggy.</p>
+
+        <h2 style="font-size:21px; font-weight:600; margin:0 0 12px; letter-spacing:-.01em;">Signal flow</h2>
+        <p contentEditable="{{ true }}" suppressContentEditableWarning="{{ true }}" style="font-size:15.5px; line-height:1.75; color:#c3c7d1; margin:0 0 16px; outline:none;">Sketching the pipeline before writing any code. Draw directly below — everything stays in this note.</p>
+
+        <!-- ═ Embedded sketch block ═ -->
+        <div data-screen-label="Sketch block" style="border:1px solid #2c2f37; border-radius:12px; background:#1a1c21; margin:0 0 30px; overflow:hidden;">
+          <div style="display:flex; align-items:center; justify-content:space-between; padding:8px 12px; border-bottom:1px solid #23252b;">
+            <div style="display:flex; align-items:center; gap:8px;">
+              <span style="font-family:'Gochi Hand'; font-size:14px; color:#8b90a0;">✎ signal-flow.sketch</span>
+            </div>
+            <div style="display:flex; align-items:center; gap:2px;">
+              <div onClick="{{ tools.pen }}" title="Pen" style="{{ toolS.pen }}" style-hover="background:#262932;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21l3.5-1L20 6.5a2.12 2.12 0 0 0-3-3L3.5 17z"></path></svg></div>
+              <div onClick="{{ tools.rect }}" title="Rectangle" style="{{ toolS.rect }}" style-hover="background:#262932;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="4" y="5" width="16" height="14" rx="2"></rect></svg></div>
+              <div onClick="{{ tools.ellipse }}" title="Ellipse" style="{{ toolS.ellipse }}" style-hover="background:#262932;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><ellipse cx="12" cy="12" rx="9" ry="7"></ellipse></svg></div>
+              <div onClick="{{ tools.arrow }}" title="Arrow" style="{{ toolS.arrow }}" style-hover="background:#262932;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20L20 4M20 4h-7M20 4v7"></path></svg></div>
+              <div onClick="{{ tools.text }}" title="Text" style="{{ toolS.text }}" style-hover="background:#262932;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M5 6h14M12 6v13"></path></svg></div>
+              <div onClick="{{ tools.eraser }}" title="Eraser" style="{{ toolS.eraser }}" style-hover="background:#262932;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M16 3l5 5L10 19H5v-5z"></path><path d="M13 6l5 5"></path></svg></div>
+              <div style="width:1px; height:16px; background:#2c2f37; margin:0 6px;"></div>
+              <div onClick="{{ cols.white }}" style="{{ colS.white }}"><span style="width:12px; height:12px; border-radius:50%; background:#e8eaf0; display:block;"></span></div>
+              <div onClick="{{ cols.violet }}" style="{{ colS.violet }}"><span style="width:12px; height:12px; border-radius:50%; background:#a78bfa; display:block;"></span></div>
+              <div onClick="{{ cols.teal }}" style="{{ colS.teal }}"><span style="width:12px; height:12px; border-radius:50%; background:#5eead4; display:block;"></span></div>
+              <div onClick="{{ cols.amber }}" style="{{ colS.amber }}"><span style="width:12px; height:12px; border-radius:50%; background:#fbbf24; display:block;"></span></div>
+              <div onClick="{{ cols.red }}" style="{{ colS.red }}"><span style="width:12px; height:12px; border-radius:50%; background:#f87171; display:block;"></span></div>
+              <div style="width:1px; height:16px; background:#2c2f37; margin:0 6px;"></div>
+              <div onClick="{{ clearCanvas }}" title="Clear" style="width:24px; height:24px; border-radius:6px; display:flex; align-items:center; justify-content:center; color:#5b6170; cursor:pointer;" style-hover="background:#262932; color:#f87171;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 7h16M9 7V4h6v3M6.5 7l1 13h9l1-13"></path></svg></div>
+            </div>
+          </div>
+          <div style="position:relative;">
+            <svg onPointerDown="{{ svgDown }}" onPointerMove="{{ svgMove }}" onPointerUp="{{ svgUp }}" width="100%" height="340" style="display:block; touch-action:none; cursor:crosshair; background-image:var(--grid-img); background-size:var(--grid-size);">
+              <defs>
+                <filter id="wob" x="-10%" y="-10%" width="120%" height="120%">
+                  <feTurbulence type="fractalNoise" baseFrequency="0.022" numOctaves="1" seed="4" result="n"></feTurbulence>
+                  <feDisplacementMap in="SourceGraphic" in2="n" scale="3.2"></feDisplacementMap>
+                </filter>
+              </defs>
+              <g style="filter:var(--wob);">
+                <sc-for list="{{ shapesR }}" as="s" hint-placeholder-count="0">
+                  <sc-if value="{{ s.isPath }}" hint-placeholder-val="{{ false }}"><path data-sid="{{ s.id }}" d="{{ s.d }}" fill="none" stroke="{{ s.color }}" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"></path></sc-if>
+                  <sc-if value="{{ s.isRect }}" hint-placeholder-val="{{ false }}"><rect data-sid="{{ s.id }}" x="{{ s.x }}" y="{{ s.y }}" width="{{ s.w }}" height="{{ s.h }}" rx="7" fill="none" stroke="{{ s.color }}" stroke-width="2.4"></rect></sc-if>
+                  <sc-if value="{{ s.isEllipse }}" hint-placeholder-val="{{ false }}"><ellipse data-sid="{{ s.id }}" cx="{{ s.cx }}" cy="{{ s.cy }}" rx="{{ s.rx }}" ry="{{ s.ry }}" fill="none" stroke="{{ s.color }}" stroke-width="2.4"></ellipse></sc-if>
+                </sc-for>
+                {{ svgTexts }}
+              </g>
+            </svg>
+            <sc-if value="{{ textDraftOn }}" hint-placeholder-val="{{ false }}">
+              <input autoFocus="{{ true }}" value="{{ draftVal }}" onChange="{{ onDraft }}" onKeyDown="{{ draftKey }}" onBlur="{{ commitText }}" placeholder="type…" style="{{ draftStyle }}">
+            </sc-if>
+          </div>
+        </div>
+
+        <h2 style="font-size:21px; font-weight:600; margin:0 0 14px; letter-spacing:-.01em;">Open questions</h2>
+        <sc-for list="{{ todos }}" as="td" hint-placeholder-count="3">
+          <div onClick="{{ toggleTodo }}" data-tid="{{ td.id }}" style="display:flex; align-items:flex-start; gap:10px; padding:5px 0; cursor:pointer; font-size:15.5px; line-height:1.6;">
+            <span style="{{ td.boxStyle }}">
+              <sc-if value="{{ td.done }}" hint-placeholder-val="{{ false }}"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#17181c" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12.5l5 5L20 6.5"></path></svg></sc-if>
+            </span>
+            <span style="{{ td.textStyle }}">{{ td.text }}</span>
+          </div>
+        </sc-for>
+
+        <div style="margin-top:44px; border-top:1px solid #2c2f37; padding-top:16px;">
+          <div style="font-size:11.5px; font-weight:600; letter-spacing:.5px; text-transform:uppercase; color:#5b6170; margin-bottom:10px;">Linked mentions · 2</div>
+          <div style="display:flex; flex-direction:column; gap:8px;">
+            <div onClick="{{ openLink }}" data-fid="sync" style="background:#1a1c21; border:1px solid #2c2f37; border-radius:8px; padding:10px 14px; cursor:pointer; font-size:13.5px;" style-hover="border-color:#3a3e48;">
+              <span style="color:var(--acc); font-weight:500;">Weekly Sync</span>
+              <span style="color:#8b90a0;"> — demo the [[Brain–Computer UI]] cursor on Thursday</span>
+            </div>
+            <div onClick="{{ openLink }}" data-fid="neural" style="background:#1a1c21; border:1px solid #2c2f37; border-radius:8px; padding:10px 14px; cursor:pointer; font-size:13.5px;" style-hover="border-color:#3a3e48;">
+              <span style="color:var(--acc); font-weight:500;">Neural Interfaces</span>
+              <span style="color:#8b90a0;"> — placement notes feed the [[Brain–Computer UI]] decoder</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    </sc-if>
+
+    <!-- ── GRAPH VIEW ── -->
+    <sc-if value="{{ showGraph }}" hint-placeholder-val="{{ false }}">
+    <div data-screen-label="Graph view" style="flex:1; position:relative; overflow:hidden; min-height:0;">
+      <div style="position:absolute; top:18px; left:24px; z-index:2;">
+        <div style="font-size:15px; font-weight:600;">Graph</div>
+        <div style="font-size:12px; color:#5b6170; margin-top:2px;">8 notes · 2 tags — click a node to open it</div>
+      </div>
+      <svg width="100%" height="100%" viewBox="0 0 800 460" preserveAspectRatio="xMidYMid meet" style="position:absolute; inset:0;">
+        <sc-for list="{{ gEdges }}" as="e" hint-placeholder-count="0">
+          <line x1="{{ e.x1 }}" y1="{{ e.y1 }}" x2="{{ e.x2 }}" y2="{{ e.y2 }}" stroke="#2c2f37" stroke-width="1.4"></line>
+        </sc-for>
+      </svg>
+      <sc-for list="{{ gNodes }}" as="n" hint-placeholder-count="0">
+        <div onClick="{{ openFile }}" data-fid="{{ n.id }}" style="{{ n.style }}" style-hover="transform:translate(-50%,-50%) scale(1.12);">
+          <span style="{{ n.dotStyle }}"></span>
+          <span style="{{ n.labelStyle }}">{{ n.label }}</span>
+        </div>
+      </sc-for>
+    </div>
+    </sc-if>
+
+    <!-- ── SLIDES VIEW ── -->
+    <sc-if value="{{ showSlides }}" hint-placeholder-val="{{ false }}">
+    <div data-screen-label="Slides view" style="flex:1; overflow-y:auto; min-height:0;">
+      <div style="max-width:860px; margin:0 auto; padding:36px 40px 80px;">
+        <div style="display:flex; align-items:flex-end; justify-content:space-between; margin-bottom:6px;">
+          <div>
+            <div style="font-size:12px; color:#5b6170; margin-bottom:6px;">Presentation from</div>
+            <div style="font-size:24px; font-weight:700; letter-spacing:-.02em;">Brain–Computer UI</div>
+          </div>
+          <div onClick="{{ openPresent }}" style="display:flex; align-items:center; gap:8px; background:var(--acc); color:#17181c; font-weight:600; font-size:13.5px; padding:9px 18px; border-radius:8px; cursor:pointer;" style-hover="filter:brightness(1.1);">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M7 4l13 8-13 8z"></path></svg>
+            Present
+          </div>
+        </div>
+        <div style="font-size:13px; color:#8b90a0; margin-bottom:22px;">3 slides drafted from your headings — pick a template, then present or export.</div>
+        <div style="display:flex; gap:8px; margin-bottom:26px;">
+          <div onClick="{{ tpl.dark }}" style="{{ tplS.dark }}">Dark minimal</div>
+          <div onClick="{{ tpl.light }}" style="{{ tplS.light }}">Paper light</div>
+          <div onClick="{{ tpl.importT }}" style="{{ tplS.importT }}">Import .pptx / .pdf template…</div>
+        </div>
+        <sc-if value="{{ importNote }}" hint-placeholder-val="{{ false }}">
+          <div style="border:1px dashed #3a3e48; border-radius:10px; padding:18px; text-align:center; color:#8b90a0; font-size:13px; margin-bottom:26px;">Drop a .pptx or .pdf here — Inkwell will map your headings onto its master slides. <span style="color:#5b6170;">(mocked in this prototype)</span></div>
+        </sc-if>
+        <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(240px, 1fr)); gap:18px;">
+          <div style="display:flex; flex-direction:column; gap:8px;">
+            <div style="{{ th.box }}">
+              <div style="{{ th.accRule }}"></div>
+              <div style="{{ th.title }}">Brain–Computer UI</div>
+              <div style="{{ th.sub }}">Projects · July 2026</div>
+            </div>
+            <div style="font-size:11.5px; color:#5b6170;">1 · Title</div>
+          </div>
+          <div style="display:flex; flex-direction:column; gap:8px;">
+            <div style="{{ th.box }}">
+              <div style="{{ th.small }}">Signal flow</div>
+              <svg width="100%" height="70" viewBox="0 0 240 70">
+                <g style="filter:var(--wob);">
+                  <rect x="18" y="22" width="52" height="26" rx="4" fill="none" stroke="#a78bfa" stroke-width="1.6"></rect>
+                  <path d="M70 35 L100 35 M94 31l6 4-6 4" fill="none" stroke="#5eead4" stroke-width="1.6" stroke-linecap="round"></path>
+                  <ellipse cx="128" cy="35" rx="26" ry="16" fill="none" stroke="#5eead4" stroke-width="1.6"></ellipse>
+                  <path d="M154 35 L184 35 M178 31l6 4-6 4" fill="none" stroke="#fbbf24" stroke-width="1.6" stroke-linecap="round"></path>
+                  <rect x="184" y="22" width="42" height="26" rx="4" fill="none" stroke="#fbbf24" stroke-width="1.6"></rect>
+                </g>
+              </svg>
+            </div>
+            <div style="font-size:11.5px; color:#5b6170;">2 · Signal flow — your sketch</div>
+          </div>
+          <div style="display:flex; flex-direction:column; gap:8px;">
+            <div style="{{ th.box }}">
+              <div style="{{ th.small }}">Open questions</div>
+              <div style="{{ th.line }}"></div>
+              <div style="{{ th.line2 }}"></div>
+              <div style="{{ th.line }}"></div>
+            </div>
+            <div style="font-size:11.5px; color:#5b6170;">3 · Open questions</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    </sc-if>
+
+    <!-- Status bar -->
+    <div style="display:flex; align-items:center; justify-content:space-between; padding:5px 14px; background:#191b1f; border-top:1px solid #23252b; font-size:11.5px; color:#5b6170; flex-shrink:0;">
+      <div>412 words · 1 sketch · 3 tasks</div>
+      <div style="display:flex; align-items:center; gap:14px;">
+        <span>⌘K quick switcher</span>
+        <span style="display:flex; align-items:center; gap:5px;"><span style="width:6px; height:6px; border-radius:50%; background:#34d399; display:inline-block;"></span>saved · local vault</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ AI panel ══ -->
+  <sc-if value="{{ aiOpen }}" hint-placeholder-val="{{ true }}">
+  <div data-screen-label="Assistant panel" style="width:300px; background:#191b1f; border-left:1px solid #23252b; display:flex; flex-direction:column; flex-shrink:0;">
+    <div style="display:flex; align-items:center; justify-content:space-between; padding:12px 14px; border-bottom:1px solid #23252b;">
+      <div style="display:flex; align-items:center; gap:8px;">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="var(--acc)"><path d="M12 3l1.9 5.4L19.5 10l-5.6 1.9L12 17.5l-1.9-5.6L4.5 10l5.6-1.6z"></path></svg>
+        <span style="font-size:13px; font-weight:600;">Assistant</span>
+      </div>
+      <span style="font-size:10.5px; color:#8b90a0; background:#22242b; border:1px solid #2c2f37; padding:2px 8px; border-radius:99px;">llama3 · on-device</span>
+    </div>
+    <div ref="{{ aiScrollRef }}" style="flex:1; overflow-y:auto; padding:14px; display:flex; flex-direction:column; gap:10px;">
+      <sc-for list="{{ msgs }}" as="m" hint-placeholder-count="2">
+        <div style="{{ m.style }}">{{ m.text }}</div>
+      </sc-for>
+      <sc-if value="{{ aiTyping }}" hint-placeholder-val="{{ false }}">
+        <div style="align-self:flex-start; background:#22242b; border-radius:10px 10px 10px 3px; padding:10px 14px; display:flex; gap:4px;">
+          <span style="width:5px; height:5px; border-radius:50%; background:#8b90a0; animation:blinkDot 1.2s infinite;"></span>
+          <span style="width:5px; height:5px; border-radius:50%; background:#8b90a0; animation:blinkDot 1.2s .2s infinite;"></span>
+          <span style="width:5px; height:5px; border-radius:50%; background:#8b90a0; animation:blinkDot 1.2s .4s infinite;"></span>
+        </div>
+      </sc-if>
+    </div>
+    <div style="padding:0 14px 10px; display:flex; flex-wrap:wrap; gap:6px;">
+      <div onClick="{{ chipSum }}" style="font-size:11.5px; color:#8b90a0; border:1px solid #2c2f37; border-radius:99px; padding:4px 10px; cursor:pointer;" style-hover="border-color:var(--acc); color:var(--acc);">Summarize note</div>
+      <div onClick="{{ chipLinks }}" style="font-size:11.5px; color:#8b90a0; border:1px solid #2c2f37; border-radius:99px; padding:4px 10px; cursor:pointer;" style-hover="border-color:var(--acc); color:var(--acc);">What links here?</div>
+      <div onClick="{{ chipSlides }}" style="font-size:11.5px; color:#8b90a0; border:1px solid #2c2f37; border-radius:99px; padding:4px 10px; cursor:pointer;" style-hover="border-color:var(--acc); color:var(--acc);">Draft slides</div>
+    </div>
+    <div style="padding:0 14px 14px;">
+      <div style="display:flex; align-items:center; gap:8px; background:#1e2025; border:1px solid #2c2f37; border-radius:10px; padding:8px 8px 8px 12px;">
+        <input value="{{ aiInput }}" onChange="{{ onAiInput }}" onKeyDown="{{ aiKey }}" placeholder="Ask your vault…" style="flex:1; background:transparent; border:none; outline:none; color:#dadde5; font-size:13px; min-width:0;">
+        <div onClick="{{ sendAi }}" style="width:26px; height:26px; border-radius:7px; background:var(--acc); display:flex; align-items:center; justify-content:center; cursor:pointer; flex-shrink:0;" style-hover="filter:brightness(1.1);">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#17181c" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"></path></svg>
+        </div>
+      </div>
+      <div style="font-size:10.5px; color:#5b6170; margin-top:8px; text-align:center;">Runs locally — your notes never leave this device</div>
+    </div>
+  </div>
+  </sc-if>
+</div>
+
+<!-- ══ Quick switcher ══ -->
+<sc-if value="{{ switcherOpen }}" hint-placeholder-val="{{ false }}">
+<div onClick="{{ closeSwitcher }}" data-screen-label="Quick switcher" style="position:fixed; inset:0; background:rgba(10,11,13,.6); z-index:50; display:flex; justify-content:center; padding-top:12vh;">
+  <div onClick="{{ stopProp }}" style="width:520px; height:fit-content; background:#1e2025; border:1px solid #2c2f37; border-radius:12px; box-shadow:0 24px 60px rgba(0,0,0,.5); overflow:hidden; animation:popIn .12s ease-out;">
+    <div style="display:flex; align-items:center; gap:10px; padding:13px 16px; border-bottom:1px solid #2c2f37;">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#8b90a0" stroke-width="1.7" stroke-linecap="round"><circle cx="11" cy="11" r="7"></circle><path d="M16.5 16.5L21 21"></path></svg>
+      <input autoFocus="{{ true }}" value="{{ query }}" onChange="{{ onQuery }}" placeholder="Jump to a note…" style="flex:1; background:transparent; border:none; outline:none; color:#dadde5; font-size:15px;">
+      <span style="font-size:10.5px; color:#5b6170; border:1px solid #2c2f37; border-radius:5px; padding:2px 6px;">esc</span>
+    </div>
+    <div style="max-height:300px; overflow-y:auto; padding:6px;">
+      <sc-for list="{{ results }}" as="r" hint-placeholder-count="4">
+        <div onClick="{{ openFile }}" data-fid="{{ r.id }}" style="display:flex; align-items:center; gap:10px; padding:8px 12px; border-radius:7px; cursor:pointer; font-size:13.5px; color:#c3c7d1;" style-hover="background:#26292f;">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#5b6170" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h9l4 4v14H6z"></path><path d="M14 3v5h5"></path></svg>
+          {{ r.name }}
+        </div>
+      </sc-for>
+    </div>
+  </div>
+</div>
+</sc-if>
+
+<!-- ══ Settings modal ══ -->
+<sc-if value="{{ settingsOpen }}" hint-placeholder-val="{{ false }}">
+<div onClick="{{ closeSettings }}" data-screen-label="Settings" style="position:fixed; inset:0; background:rgba(10,11,13,.6); z-index:50; display:flex; align-items:center; justify-content:center;">
+  <div onClick="{{ stopProp }}" style="width:460px; background:#1e2025; border:1px solid #2c2f37; border-radius:14px; box-shadow:0 24px 60px rgba(0,0,0,.5); padding:22px 24px; animation:popIn .12s ease-out;">
+    <div style="font-size:17px; font-weight:700; margin-bottom:2px;">Settings</div>
+    <div style="font-size:12.5px; color:#8b90a0; margin-bottom:18px;">Inkwell vault · v0.1</div>
+    <div style="display:flex; flex-direction:column;">
+      <div onClick="{{ tog }}" data-key="localAi" style="display:flex; align-items:center; justify-content:space-between; padding:11px 0; border-bottom:1px solid #26292f; cursor:pointer;">
+        <div><div style="font-size:13.5px; font-weight:500;">Local assistant</div><div style="font-size:12px; color:#8b90a0;">llama3 via Ollama — no data leaves this device</div></div>
+        <span style="{{ togS.localAi.pill }}"><span style="{{ togS.localAi.knob }}"></span></span>
+      </div>
+      <div onClick="{{ tog }}" data-key="sync" style="display:flex; align-items:center; justify-content:space-between; padding:11px 0; border-bottom:1px solid #26292f; cursor:pointer;">
+        <div><div style="font-size:13.5px; font-weight:500;">Sync</div><div style="font-size:12px; color:#8b90a0;">End-to-end encrypted, for sharing with friends</div></div>
+        <span style="{{ togS.sync.pill }}"><span style="{{ togS.sync.knob }}"></span></span>
+      </div>
+      <div onClick="{{ tog }}" data-key="spell" style="display:flex; align-items:center; justify-content:space-between; padding:11px 0; border-bottom:1px solid #26292f; cursor:pointer;">
+        <div><div style="font-size:13.5px; font-weight:500;">Spellcheck</div><div style="font-size:12px; color:#8b90a0;">Underline unknown words while writing</div></div>
+        <span style="{{ togS.spell.pill }}"><span style="{{ togS.spell.knob }}"></span></span>
+      </div>
+      <div onClick="{{ tog }}" data-key="vim" style="display:flex; align-items:center; justify-content:space-between; padding:11px 0; cursor:pointer;">
+        <div><div style="font-size:13.5px; font-weight:500;">Vim keybindings</div><div style="font-size:12px; color:#8b90a0;">For the brave</div></div>
+        <span style="{{ togS.vim.pill }}"><span style="{{ togS.vim.knob }}"></span></span>
+      </div>
+    </div>
+    <div onClick="{{ closeSettings }}" style="margin-top:20px; text-align:center; background:#26292f; border-radius:8px; padding:9px; font-size:13px; font-weight:500; cursor:pointer;" style-hover="background:#2c2f37;">Done</div>
+  </div>
+</div>
+</sc-if>
+
+<!-- ══ Present overlay ══ -->
+<sc-if value="{{ present }}" hint-placeholder-val="{{ false }}">
+<div data-screen-label="Presentation" style="{{ presentBg }}">
+  <div onClick="{{ closePresent }}" style="position:absolute; top:18px; right:20px; width:32px; height:32px; border-radius:8px; display:flex; align-items:center; justify-content:center; cursor:pointer; color:inherit; opacity:.55;" style-hover="opacity:1;">
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M5 5l14 14M19 5L5 19"></path></svg>
+  </div>
+  <sc-if value="{{ s0 }}" hint-placeholder-val="{{ true }}">
+    <div style="text-align:center; animation:fadeUp .3s ease-out;">
+      <div style="{{ pr.rule }}"></div>
+      <div style="{{ pr.title }}">Brain–Computer UI</div>
+      <div style="{{ pr.sub }}">Projects · July 2026</div>
+    </div>
+  </sc-if>
+  <sc-if value="{{ s1 }}" hint-placeholder-val="{{ false }}">
+    <div style="text-align:center; width:min(860px, 84vw); animation:fadeUp .3s ease-out;">
+      <div style="{{ pr.h2 }}">Signal flow</div>
+      <svg width="100%" height="380" viewBox="0 0 640 340" preserveAspectRatio="xMidYMid meet">
+        <g style="filter:var(--wob);">
+          <sc-for list="{{ shapesR }}" as="s" hint-placeholder-count="0">
+            <sc-if value="{{ s.isPath }}" hint-placeholder-val="{{ false }}"><path d="{{ s.d }}" fill="none" stroke="{{ s.color }}" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"></path></sc-if>
+            <sc-if value="{{ s.isRect }}" hint-placeholder-val="{{ false }}"><rect x="{{ s.x }}" y="{{ s.y }}" width="{{ s.w }}" height="{{ s.h }}" rx="7" fill="none" stroke="{{ s.color }}" stroke-width="2.4"></rect></sc-if>
+            <sc-if value="{{ s.isEllipse }}" hint-placeholder-val="{{ false }}"><ellipse cx="{{ s.cx }}" cy="{{ s.cy }}" rx="{{ s.rx }}" ry="{{ s.ry }}" fill="none" stroke="{{ s.color }}" stroke-width="2.4"></ellipse></sc-if>
+          </sc-for>
+          {{ svgTexts }}
+        </g>
+      </svg>
+    </div>
+  </sc-if>
+  <sc-if value="{{ s2 }}" hint-placeholder-val="{{ false }}">
+    <div style="width:min(720px, 80vw); animation:fadeUp .3s ease-out;">
+      <div style="{{ pr.h2 }}">Open questions</div>
+      <sc-for list="{{ prBullets }}" as="b" hint-placeholder-count="3">
+        <div style="{{ pr.bullet }}"><span style="{{ pr.dot }}"></span>{{ b.text }}</div>
+      </sc-for>
+    </div>
+  </sc-if>
+  <div style="position:absolute; bottom:26px; display:flex; align-items:center; gap:18px;">
+    <div onClick="{{ prevSlide }}" style="cursor:pointer; opacity:.55; display:flex;" style-hover="opacity:1;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"></path></svg></div>
+    <div style="display:flex; gap:7px;">
+      <sc-for list="{{ dots }}" as="d" hint-placeholder-count="3">
+        <span onClick="{{ goDot }}" data-ix="{{ d.ix }}" style="{{ d.style }}"></span>
+      </sc-for>
+    </div>
+    <div onClick="{{ nextSlide }}" style="cursor:pointer; opacity:.55; display:flex;" style-hover="opacity:1;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5l7 7-7 7"></path></svg></div>
+  </div>
+</div>
+</sc-if>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;accent&quot;:{&quot;editor&quot;:&quot;color&quot;,&quot;default&quot;:&quot;#fbbf24&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;options&quot;:[&quot;#a78bfa&quot;,&quot;#5eead4&quot;,&quot;#fbbf24&quot;,&quot;#f472b6&quot;],&quot;section&quot;:&quot;Theme&quot;},&quot;sketchy&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Sketch canvas&quot;},&quot;canvasGrid&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;default&quot;:&quot;dots&quot;,&quot;options&quot;:[&quot;dots&quot;,&quot;lines&quot;,&quot;plain&quot;],&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Sketch canvas&quot;}}">
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.FILES = [
+      { id: 'f-research', folder: true, name: 'Research' },
+      { id: 'neural', name: 'Neural Interfaces', parent: 'f-research' },
+      { id: 'reading', name: 'Reading List', parent: 'f-research' },
+      { id: 'f-projects', folder: true, name: 'Projects' },
+      { id: 'bci', name: 'Brain–Computer UI', parent: 'f-projects' },
+      { id: 'sync', name: 'Weekly Sync', parent: 'f-projects' },
+      { id: 'daily', name: '2026-07-06', top: true },
+      { id: 'inbox', name: 'Ideas Inbox', top: true },
+    ];
+    this.GNODES = [
+      { id: 'bci', x: 52, y: 46, r: 24, label: 'Brain–Computer UI', acc: true },
+      { id: 'neural', x: 32, y: 26, r: 15, label: 'Neural Interfaces' },
+      { id: 'reading', x: 18, y: 58, r: 11, label: 'Reading List' },
+      { id: 'sync', x: 74, y: 24, r: 12, label: 'Weekly Sync' },
+      { id: 'inbox', x: 80, y: 70, r: 10, label: 'Ideas Inbox' },
+      { id: 'daily', x: 38, y: 78, r: 10, label: '2026-07-06' },
+      { id: 'tag-design', x: 64, y: 72, r: 7, label: '#design', tag: true },
+      { id: 'tag-bci', x: 46, y: 12, r: 7, label: '#bci', tag: true },
+    ];
+    this.GEDGES = [['bci','neural'],['bci','reading'],['bci','sync'],['bci','tag-design'],['bci','tag-bci'],['neural','tag-bci'],['neural','reading'],['bci','daily'],['inbox','bci']];
+    this.state = {
+      view: 'editor', sidebarOpen: true, aiOpen: true,
+      activeFile: 'bci', openTabs: ['bci', 'reading'], collapsed: {},
+      tool: 'pen', color: '#e8eaf0',
+      shapes: [
+        { id: 'p1', type: 'rect', x: 56, y: 118, w: 128, h: 62, color: '#e8eaf0' },
+        { id: 'p2', type: 'text', x: 86, y: 156, text: 'EEG cap', color: '#e8eaf0' },
+        { id: 'p3', type: 'arrow', x0: 186, y0: 149, x1: 262, y1: 149, color: '#a78bfa' },
+        { id: 'p4', type: 'ellipse', cx: 328, cy: 149, rx: 64, ry: 38, color: '#5eead4' },
+        { id: 'p5', type: 'text', x: 293, y: 156, text: 'Decoder', color: '#5eead4' },
+        { id: 'p6', type: 'arrow', x0: 394, y0: 149, x1: 468, y1: 149, color: '#a78bfa' },
+        { id: 'p7', type: 'rect', x: 468, y: 118, w: 112, h: 62, color: '#fbbf24' },
+        { id: 'p8', type: 'text', x: 486, y: 156, text: 'Cursor UI', color: '#fbbf24' },
+        { id: 'p9', type: 'text', x: 210, y: 62, text: 'thought → action in <90ms', color: '#8b90a0' },
+        { id: 'p10', type: 'arrow', x0: 305, y0: 74, x1: 322, y1: 104, color: '#8b90a0' },
+      ],
+      drag: null, textDraft: null, draftVal: '',
+      todos: [
+        { id: 't1', text: 'Latency budget — is 90ms actually perceivable?', done: false },
+        { id: 't2', text: 'Dry electrodes vs gel for daily wear', done: true },
+        { id: 't3', text: 'Fallback when decoder confidence drops below 0.6', done: false },
+      ],
+      switcherOpen: false, query: '', settingsOpen: false,
+      settings: { localAi: true, sync: false, spell: true, vim: false },
+      slideTemplate: 'dark', importNote: false, present: false, slideIx: 0,
+      aiMessages: [
+        { role: 'a', text: "I'm running locally on this vault — 8 notes, 1 sketch. Ask me anything, or tell me to add to a note." },
+        { role: 'u', text: 'What did I decide about electrode placement?' },
+        { role: 'a', text: 'In “Brain–Computer UI” you settled on a dry-electrode headband over the motor cortex, with an open question on dry vs gel for daily wear. “Neural Interfaces” has two linked papers on placement.' },
+      ],
+      aiInput: '', aiTyping: false,
+    };
+  }
+
+  componentDidMount() {
+    this.kd = (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        this.setState(s => ({ switcherOpen: !s.switcherOpen, query: '' }));
+        return;
+      }
+      if (e.key === 'Escape') {
+        this.setState({ switcherOpen: false, settingsOpen: false, present: false, textDraft: null });
+        return;
+      }
+      if (this.state.present) {
+        if (e.key === 'ArrowRight') this.setState(s => ({ slideIx: Math.min(2, s.slideIx + 1) }));
+        if (e.key === 'ArrowLeft') this.setState(s => ({ slideIx: Math.max(0, s.slideIx - 1) }));
+      }
+    };
+    window.addEventListener('keydown', this.kd);
+    this.applyVars();
+  }
+  componentDidUpdate() { this.applyVars(); }
+  componentWillUnmount() { window.removeEventListener('keydown', this.kd); }
+
+  applyVars() {
+    const el = this.rootEl; if (!el) return;
+    el.style.setProperty('--acc', this.props.accent ?? '#a78bfa');
+    el.style.setProperty('--wob', (this.props.sketchy ?? true) ? 'url(#wob)' : 'none');
+    const g = this.props.canvasGrid ?? 'dots';
+    if (g === 'dots') { el.style.setProperty('--grid-img', 'radial-gradient(#292c34 1.2px, transparent 1.2px)'); el.style.setProperty('--grid-size', '20px 20px'); }
+    else if (g === 'lines') { el.style.setProperty('--grid-img', 'linear-gradient(#22252c 1px, transparent 1px), linear-gradient(90deg, #22252c 1px, transparent 1px)'); el.style.setProperty('--grid-size', '24px 24px'); }
+    else { el.style.setProperty('--grid-img', 'none'); el.style.setProperty('--grid-size', 'auto'); }
+  }
+
+  arrowD(x0, y0, x1, y1) {
+    const a = Math.atan2(y1 - y0, x1 - x0), h = 11;
+    return 'M ' + x0 + ' ' + y0 + ' L ' + x1 + ' ' + y1 +
+      ' M ' + (x1 - h * Math.cos(a - 0.5)) + ' ' + (y1 - h * Math.sin(a - 0.5)) +
+      ' L ' + x1 + ' ' + y1 +
+      ' L ' + (x1 - h * Math.cos(a + 0.5)) + ' ' + (y1 - h * Math.sin(a + 0.5));
+  }
+
+  svgPt(e) { const r = e.currentTarget.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; }
+
+  aiReply(t) {
+    const q = t.toLowerCase();
+    if (q.includes('summar')) return 'Gist of “Brain–Computer UI”: a dry-electrode headband streams EEG to an on-device decoder that drives a cursor, with a <90ms thought-to-action target. Open: electrode comfort, and a fallback when decoder confidence is low.';
+    if (q.includes('link') || q.includes('mention')) return 'Two notes link here — “Weekly Sync” (demo planned Thursday) and “Neural Interfaces” (placement papers feed the decoder section).';
+    if (q.includes('slide') || q.includes('present')) return 'Drafted 3 slides from this note in the Slides view: title, your signal-flow sketch, and open questions. Pick a template there or import your own .pptx.';
+    return 'Searching the vault… “Brain–Computer UI” is your most-edited note this week; it links to Neural Interfaces and targets <90ms latency. Want a summary, or should I draft slides from it?';
+  }
+
+  scrollAi() { const el = this.aiScroll; if (el) requestAnimationFrame(() => { el.scrollTop = el.scrollHeight; }); }
+
+  renderVals() {
+    const S = this.state;
+    const acc = 'var(--acc)';
+    const btn = (on) => ({ width: '30px', height: '30px', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: on ? 'var(--acc)' : '#8b90a0', background: on ? 'color-mix(in oklab, var(--acc) 14%, transparent)' : 'transparent' });
+    const rail = {
+      files: btn(S.view === 'editor' && S.sidebarOpen),
+      search: btn(S.switcherOpen),
+      graph: btn(S.view === 'graph'),
+      slides: btn(S.view === 'slides'),
+      ai: btn(S.aiOpen),
+      settings: btn(S.settingsOpen),
+    };
+
+    // file tree
+    const tree = [];
+    for (const f of this.FILES) {
+      if (f.parent && S.collapsed[f.parent]) continue;
+      const active = !f.folder && S.activeFile === f.id;
+      tree.push({
+        id: f.id, name: f.name, isFolder: !!f.folder, isNote: !f.folder,
+        chev: f.folder ? (S.collapsed[f.id] ? '▸' : '▾') : '',
+        style: {
+          display: 'flex', alignItems: 'center', gap: '6px', padding: '4px 6px',
+          paddingLeft: f.parent ? '14px' : '6px', borderRadius: '6px', cursor: 'pointer',
+          fontSize: '13px', color: active ? '#e6e2f7' : (f.folder ? '#aeb3c0' : '#9aa0af'),
+          fontWeight: f.folder ? 600 : 400,
+          background: active ? 'color-mix(in oklab, var(--acc) 16%, transparent)' : 'transparent',
+        },
+        iconStyle: { display: 'inline-flex', flexShrink: 0, color: active ? 'var(--acc)' : '#5b6170' },
+      });
+    }
+
+    const tabs = S.openTabs.map(id => {
+      const f = this.FILES.find(x => x.id === id);
+      const active = S.activeFile === id && S.view === 'editor';
+      return {
+        id, name: f ? f.name : id,
+        style: {
+          display: 'flex', alignItems: 'center', gap: '7px', padding: '7px 10px 7px 14px',
+          fontSize: '12.5px', cursor: 'pointer', borderRadius: '8px 8px 0 0',
+          background: active ? '#1e2025' : 'transparent',
+          color: active ? '#dadde5' : '#8b90a0',
+          border: active ? '1px solid #23252b' : '1px solid transparent', borderBottom: 'none',
+        },
+      };
+    });
+
+    // canvas shapes
+    const mapShape = (s) => {
+      if (s.type === 'path') return { id: s.id, isPath: true, d: s.d, color: s.color };
+      if (s.type === 'arrow') return { id: s.id, isPath: true, d: this.arrowD(s.x0, s.y0, s.x1, s.y1), color: s.color };
+      if (s.type === 'rect') return { id: s.id, isRect: true, x: s.x, y: s.y, w: s.w, h: s.h, color: s.color };
+      if (s.type === 'ellipse') return { id: s.id, isEllipse: true, cx: s.cx, cy: s.cy, rx: s.rx, ry: s.ry, color: s.color };
+      return { id: s.id, isText: true, x: s.x, y: s.y, text: s.text, color: s.color };
+    };
+    const shapesR = S.shapes.map(mapShape);
+    if (S.drag) {
+      const d = S.drag, t = S.tool, c = S.color;
+      if (t === 'pen') shapesR.push(mapShape({ id: '_p', type: 'path', d: 'M ' + d.points.map(p => p[0] + ' ' + p[1]).join(' L '), color: c }));
+      else if (t === 'rect') shapesR.push(mapShape({ id: '_p', type: 'rect', x: Math.min(d.x0, d.x1), y: Math.min(d.y0, d.y1), w: Math.abs(d.x1 - d.x0), h: Math.abs(d.y1 - d.y0), color: c }));
+      else if (t === 'ellipse') shapesR.push(mapShape({ id: '_p', type: 'ellipse', cx: (d.x0 + d.x1) / 2, cy: (d.y0 + d.y1) / 2, rx: Math.abs(d.x1 - d.x0) / 2, ry: Math.abs(d.y1 - d.y0) / 2, color: c }));
+      else if (t === 'arrow') shapesR.push(mapShape({ id: '_p', type: 'arrow', x0: d.x0, y0: d.y0, x1: d.x1, y1: d.y1, color: c }));
+    }
+
+    const toolBtn = (name) => ({ width: '24px', height: '24px', borderRadius: '6px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: S.tool === name ? 'var(--acc)' : '#8b90a0', background: S.tool === name ? 'color-mix(in oklab, var(--acc) 16%, transparent)' : 'transparent' });
+    const colBtn = (hex) => ({ width: '22px', height: '22px', borderRadius: '6px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', outline: S.color === hex ? '1.5px solid ' + hex : 'none', outlineOffset: '-1px' });
+    const COLORS = { white: '#e8eaf0', violet: '#a78bfa', teal: '#5eead4', amber: '#fbbf24', red: '#f87171' };
+
+    const todos = S.todos.map(t => ({
+      ...t,
+      boxStyle: { width: '17px', height: '17px', borderRadius: '5px', flexShrink: 0, marginTop: '3px', display: 'flex', alignItems: 'center', justifyContent: 'center', border: t.done ? 'none' : '1.5px solid #4a4f5c', background: t.done ? 'var(--acc)' : 'transparent' },
+      textStyle: { color: t.done ? '#5b6170' : '#c3c7d1', textDecoration: t.done ? 'line-through' : 'none' },
+    }));
+
+    // graph (viewport 800x460, node coords in %)
+    const px = (n) => ({ X: n.x * 8, Y: n.y * 4.6 });
+    const gEdges = this.GEDGES.map(([a, b]) => {
+      const A = px(this.GNODES.find(n => n.id === a)), B = px(this.GNODES.find(n => n.id === b));
+      return { x1: A.X, y1: A.Y, x2: B.X, y2: B.Y };
+    });
+    const gNodes = this.GNODES.map((n, i) => ({
+      id: n.id, label: n.label,
+      style: { position: 'absolute', left: n.x + '%', top: n.y + '%', transform: 'translate(-50%,-50%)', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '7px', cursor: n.tag ? 'default' : 'pointer', transition: 'transform .15s ease', animation: 'floatY ' + (5 + i * 0.7) + 's ease-in-out ' + (i * 0.4) + 's infinite' },
+      dotStyle: { width: n.r + 'px', height: n.r + 'px', borderRadius: '50%', background: n.acc ? 'var(--acc)' : (n.tag ? 'transparent' : '#4a4f5c'), border: n.tag ? '1.5px dashed #5b6170' : 'none', boxShadow: n.acc ? '0 0 24px color-mix(in oklab, var(--acc) 55%, transparent)' : 'none' },
+      labelStyle: { fontSize: n.acc ? '13px' : '11.5px', fontWeight: n.acc ? 600 : 400, color: n.tag ? '#5b6170' : (n.acc ? '#dadde5' : '#8b90a0'), whiteSpace: 'nowrap', fontFamily: n.tag ? "'Gochi Hand'" : 'inherit' },
+    }));
+
+    // slides theming
+    const light = S.slideTemplate === 'light';
+    const chip = (on) => ({ fontSize: '12.5px', padding: '6px 14px', borderRadius: '99px', cursor: 'pointer', border: on ? '1px solid var(--acc)' : '1px solid #2c2f37', color: on ? 'var(--acc)' : '#8b90a0', background: on ? 'color-mix(in oklab, var(--acc) 10%, transparent)' : 'transparent' });
+    const thBg = light ? '#f4f1e9' : '#141518';
+    const thInk = light ? '#26221a' : '#e8eaf0';
+    const thSub = light ? '#8a8272' : '#5b6170';
+    const th = {
+      box: { aspectRatio: '16/9', background: thBg, border: '1px solid ' + (light ? '#e0dbcd' : '#2c2f37'), borderRadius: '8px', padding: '16px 18px', display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: '7px', overflow: 'hidden' },
+      accRule: { width: '26px', height: '3px', borderRadius: '2px', background: 'var(--acc)' },
+      title: { fontSize: '15px', fontWeight: 700, color: thInk, letterSpacing: '-.01em' },
+      sub: { fontSize: '10.5px', color: thSub },
+      small: { fontSize: '12px', fontWeight: 600, color: thInk },
+      line: { height: '6px', borderRadius: '3px', background: light ? '#dcd6c6' : '#26292f', width: '82%' },
+      line2: { height: '6px', borderRadius: '3px', background: light ? '#dcd6c6' : '#26292f', width: '64%' },
+    };
+    const tplS = { dark: chip(S.slideTemplate === 'dark'), light: chip(light), importT: chip(S.slideTemplate === 'import') };
+
+    const prInk = light ? '#26221a' : '#e8eaf0';
+    const pr = {
+      rule: { width: '44px', height: '4px', borderRadius: '2px', background: 'var(--acc)', margin: '0 auto 26px' },
+      title: { fontSize: 'min(72px, 7vw)', fontWeight: 700, letterSpacing: '-.03em', color: prInk },
+      sub: { fontSize: '19px', color: light ? '#8a8272' : '#8b90a0', marginTop: '14px' },
+      h2: { fontSize: '38px', fontWeight: 700, letterSpacing: '-.02em', color: prInk, marginBottom: '30px' },
+      bullet: { display: 'flex', alignItems: 'baseline', gap: '16px', fontSize: '24px', lineHeight: 1.5, color: light ? '#4a443a' : '#c3c7d1', marginBottom: '18px' },
+      dot: { width: '9px', height: '9px', borderRadius: '50%', background: 'var(--acc)', flexShrink: 0, position: 'relative', top: '-2px' },
+    };
+    const presentBg = { position: 'fixed', inset: 0, zIndex: 60, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: light ? '#f4f1e9' : '#101114', color: prInk };
+    const dots = [0, 1, 2].map(ix => ({ ix, style: { width: '8px', height: '8px', borderRadius: '50%', cursor: 'pointer', background: S.slideIx === ix ? 'var(--acc)' : (light ? '#d5cfbf' : '#2c2f37'), display: 'inline-block' } }));
+
+    const q = S.query.trim().toLowerCase();
+    const results = this.FILES.filter(f => !f.folder && (!q || f.name.toLowerCase().includes(q)));
+
+    const msgs = S.aiMessages.map(m => ({
+      text: m.text,
+      style: m.role === 'u'
+        ? { alignSelf: 'flex-end', maxWidth: '85%', background: 'color-mix(in oklab, var(--acc) 22%, #22242b)', color: '#e6e2f7', borderRadius: '10px 10px 3px 10px', padding: '9px 13px', fontSize: '13px', lineHeight: 1.55, animation: 'fadeUp .2s ease-out' }
+        : { alignSelf: 'flex-start', maxWidth: '92%', background: '#22242b', color: '#c3c7d1', borderRadius: '10px 10px 10px 3px', padding: '9px 13px', fontSize: '13px', lineHeight: 1.55, animation: 'fadeUp .2s ease-out' },
+    }));
+
+    const setTool = (t) => () => this.setState({ tool: t, textDraft: null });
+    const setCol = (c) => () => this.setState({ color: c });
+    const send = () => {
+      const t = this.state.aiInput.trim(); if (!t) return;
+      this.setState(s => ({ aiMessages: [...s.aiMessages, { role: 'u', text: t }], aiInput: '', aiTyping: true }), () => this.scrollAi());
+      setTimeout(() => {
+        this.setState(s => ({ aiMessages: [...s.aiMessages, { role: 'a', text: this.aiReply(t) }], aiTyping: false }), () => this.scrollAi());
+      }, 950);
+    };
+    const chipSend = (txt) => () => this.setState({ aiInput: txt }, send);
+    const togPill = (on) => ({ width: '34px', height: '20px', borderRadius: '99px', background: on ? 'var(--acc)' : '#2c2f37', position: 'relative', flexShrink: 0, transition: 'background .15s' });
+    const togKnob = (on) => ({ position: 'absolute', top: '2px', left: on ? '16px' : '2px', width: '16px', height: '16px', borderRadius: '50%', background: on ? '#17181c' : '#8b90a0', transition: 'left .15s' });
+    const togS = {};
+    for (const k of ['localAi', 'sync', 'spell', 'vim']) togS[k] = { pill: togPill(S.settings[k]), knob: togKnob(S.settings[k]) };
+
+    return {
+      rootRef: (el) => { this.rootEl = el; },
+      aiScrollRef: (el) => { this.aiScroll = el; },
+      rail,
+      railFiles: () => this.setState(s => ({ view: 'editor', sidebarOpen: s.view === 'editor' ? !s.sidebarOpen : s.sidebarOpen })),
+      railSearch: () => this.setState(s => ({ switcherOpen: !s.switcherOpen, query: '' })),
+      railGraph: () => this.setState({ view: 'graph' }),
+      railSlides: () => this.setState({ view: 'slides' }),
+      railAI: () => this.setState(s => ({ aiOpen: !s.aiOpen })),
+      railSettings: () => this.setState({ settingsOpen: true }),
+      sidebarOpen: S.sidebarOpen && S.view === 'editor',
+      aiOpen: S.aiOpen,
+      tree, tabs,
+      openFile: (e) => {
+        const id = e.currentTarget.dataset.fid;
+        const f = this.FILES.find(x => x.id === id);
+        if (!f || f.folder) { if (f) this.setState(s => ({ collapsed: { ...s.collapsed, [id]: !s.collapsed[id] } })); return; }
+        if (id.startsWith('tag-')) return;
+        this.setState(s => ({ activeFile: id, view: 'editor', switcherOpen: false, openTabs: s.openTabs.includes(id) ? s.openTabs : [...s.openTabs, id] }));
+      },
+      openLink: (e) => {
+        e.preventDefault();
+        const id = e.currentTarget.dataset.fid;
+        this.setState(s => ({ activeFile: id, view: 'editor', openTabs: s.openTabs.includes(id) ? s.openTabs : [...s.openTabs, id] }));
+      },
+      clickTab: (e) => this.setState({ activeFile: e.currentTarget.dataset.fid, view: 'editor' }),
+      closeTab: (e) => {
+        e.stopPropagation();
+        const id = e.currentTarget.dataset.fid;
+        this.setState(s => {
+          const rest = s.openTabs.filter(t => t !== id);
+          return { openTabs: rest.length ? rest : ['bci'], activeFile: s.activeFile === id ? (rest[0] || 'bci') : s.activeFile };
+        });
+      },
+      showEditor: S.view === 'editor',
+      showGraph: S.view === 'graph',
+      showSlides: S.view === 'slides',
+
+      // canvas
+      shapesR,
+      tools: { pen: setTool('pen'), rect: setTool('rect'), ellipse: setTool('ellipse'), arrow: setTool('arrow'), text: setTool('text'), eraser: setTool('eraser') },
+      toolS: { pen: toolBtn('pen'), rect: toolBtn('rect'), ellipse: toolBtn('ellipse'), arrow: toolBtn('arrow'), text: toolBtn('text'), eraser: toolBtn('eraser') },
+      cols: { white: setCol(COLORS.white), violet: setCol(COLORS.violet), teal: setCol(COLORS.teal), amber: setCol(COLORS.amber), red: setCol(COLORS.red) },
+      colS: { white: colBtn(COLORS.white), violet: colBtn(COLORS.violet), teal: colBtn(COLORS.teal), amber: colBtn(COLORS.amber), red: colBtn(COLORS.red) },
+      clearCanvas: () => this.setState({ shapes: [] }),
+      svgDown: (e) => {
+        const [x, y] = this.svgPt(e);
+        const t = this.state.tool;
+        if (t === 'eraser') {
+          const sid = e.target.dataset && e.target.dataset.sid;
+          if (sid) this.setState(s => ({ shapes: s.shapes.filter(sh => sh.id !== sid) }));
+          return;
+        }
+        if (t === 'text') { this.setState({ textDraft: { x, y }, draftVal: '' }); return; }
+        e.currentTarget.setPointerCapture(e.pointerId);
+        this.setState({ drag: { x0: x, y0: y, x1: x, y1: y, points: [[x, y]] } });
+      },
+      svgMove: (e) => {
+        if (!this.state.drag) return;
+        const [x, y] = this.svgPt(e);
+        this.setState(s => ({ drag: { ...s.drag, x1: x, y1: y, points: s.tool === 'pen' ? [...s.drag.points, [x, y]] : s.drag.points } }));
+      },
+      svgUp: () => {
+        const d = this.state.drag; if (!d) return;
+        const t = this.state.tool, c = this.state.color;
+        const id = 'u' + Date.now();
+        const tiny = Math.abs(d.x1 - d.x0) < 4 && Math.abs(d.y1 - d.y0) < 4;
+        let sh = null;
+        if (t === 'pen' && d.points.length > 1) sh = { id, type: 'path', d: 'M ' + d.points.map(p => p[0] + ' ' + p[1]).join(' L '), color: c };
+        else if (!tiny && t === 'rect') sh = { id, type: 'rect', x: Math.min(d.x0, d.x1), y: Math.min(d.y0, d.y1), w: Math.abs(d.x1 - d.x0), h: Math.abs(d.y1 - d.y0), color: c };
+        else if (!tiny && t === 'ellipse') sh = { id, type: 'ellipse', cx: (d.x0 + d.x1) / 2, cy: (d.y0 + d.y1) / 2, rx: Math.abs(d.x1 - d.x0) / 2, ry: Math.abs(d.y1 - d.y0) / 2, color: c };
+        else if (!tiny && t === 'arrow') sh = { id, type: 'arrow', x0: d.x0, y0: d.y0, x1: d.x1, y1: d.y1, color: c };
+        this.setState(s => ({ drag: null, shapes: sh ? [...s.shapes, sh] : s.shapes }));
+      },
+      textDraftOn: !!S.textDraft,
+      draftVal: S.draftVal,
+      onDraft: (e) => this.setState({ draftVal: e.target.value }),
+      draftKey: (e) => { if (e.key === 'Enter') e.target.blur(); },
+      commitText: () => {
+        const td = this.state.textDraft;
+        if (td && this.state.draftVal.trim()) {
+          this.setState(s => ({ shapes: [...s.shapes, { id: 'u' + Date.now(), type: 'text', x: td.x, y: td.y + 6, text: s.draftVal.trim(), color: s.color }], textDraft: null, draftVal: '' }));
+        } else this.setState({ textDraft: null, draftVal: '' });
+      },
+      draftStyle: S.textDraft ? { position: 'absolute', left: S.textDraft.x + 'px', top: (S.textDraft.y - 14) + 'px', background: '#1e2025', border: '1px solid var(--acc)', borderRadius: '6px', color: S.color, fontFamily: "'Gochi Hand'", fontSize: '18px', padding: '3px 8px', outline: 'none', width: '160px' } : {},
+
+      todos,
+      toggleTodo: (e) => {
+        const id = e.currentTarget.dataset.tid;
+        this.setState(s => ({ todos: s.todos.map(t => t.id === id ? { ...t, done: !t.done } : t) }));
+      },
+
+      gNodes, gEdges,
+
+      // slides
+      tpl: {
+        dark: () => this.setState({ slideTemplate: 'dark', importNote: false }),
+        light: () => this.setState({ slideTemplate: 'light', importNote: false }),
+        importT: () => this.setState({ slideTemplate: 'import', importNote: true }),
+      },
+      tplS, th, importNote: S.importNote,
+      openPresent: () => this.setState({ present: true, slideIx: 0 }),
+      closePresent: () => this.setState({ present: false }),
+      present: S.present,
+      s0: S.slideIx === 0, s1: S.slideIx === 1, s2: S.slideIx === 2,
+      pr, presentBg, dots,
+      prBullets: S.todos.map(t => ({ text: t.text })),
+      nextSlide: () => this.setState(s => ({ slideIx: Math.min(2, s.slideIx + 1) })),
+      prevSlide: () => this.setState(s => ({ slideIx: Math.max(0, s.slideIx - 1) })),
+      goDot: (e) => this.setState({ slideIx: Number(e.currentTarget.dataset.ix) }),
+
+      // switcher / settings
+      switcherOpen: S.switcherOpen,
+      closeSwitcher: () => this.setState({ switcherOpen: false }),
+      stopProp: (e) => e.stopPropagation(),
+      query: S.query,
+      onQuery: (e) => this.setState({ query: e.target.value }),
+      results,
+      settingsOpen: S.settingsOpen,
+      closeSettings: () => this.setState({ settingsOpen: false }),
+      togS,
+      tog: (e) => {
+        const k = e.currentTarget.dataset.key;
+        this.setState(s => ({ settings: { ...s.settings, [k]: !s.settings[k] } }));
+      },
+
+      // ai
+      msgs, aiTyping: S.aiTyping, aiInput: S.aiInput,
+      onAiInput: (e) => this.setState({ aiInput: e.target.value }),
+      aiKey: (e) => { if (e.key === 'Enter') send(); },
+      sendAi: send,
+      chipSum: chipSend('Summarize this note'),
+      chipLinks: chipSend('What links here?'),
+      chipSlides: chipSend('Draft slides from this note'),
+    };
+  }
+}
+</script>
+</body>
+</html>
