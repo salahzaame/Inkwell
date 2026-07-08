@@ -6,72 +6,32 @@ export const KBD = isMac ? '⌘K' : 'Ctrl+K';
 const DAY = 86400000;
 const now = Date.now();
 
+// A single, deletable welcome note — the only thing a brand-new vault ships with.
+export const WELCOME_ID = 'welcome';
+
 export const INITIAL_FILES = [
-  { id: 'f-research', folder: true, name: 'Research' },
-  { id: 'neural', name: 'Neural Interfaces', parent: 'f-research', mtime: now - DAY },
-  { id: 'reading', name: 'Reading List', parent: 'f-research', mtime: now - 4 * DAY },
-  { id: 'f-projects', folder: true, name: 'Projects' },
-  { id: 'bci', name: 'Brain–Computer UI', parent: 'f-projects', mtime: now },
-  { id: 'sync', name: 'Weekly Sync', parent: 'f-projects', mtime: now - 3 * DAY },
-  { id: 'daily', name: '2026-07-06', top: true, mtime: now },
-  { id: 'inbox', name: 'Ideas Inbox', top: true, mtime: now },
+  { id: WELCOME_ID, name: 'Welcome', top: true, mtime: now },
 ];
 
 export const INITIAL_DOCS = {
-  bci: [
-    'Prototype for a cursor you steer by thought. The headband streams EEG to an on-device decoder — background reading in [[Neural Interfaces]]. Target: thought → action in **under 90ms**, or it feels laggy. #bci #design',
+  [WELCOME_ID]: [
+    '# Welcome to Inkwell 👋',
     '',
-    '## Signal flow',
+    'A local-first notebook — your notes live in **this browser**, and everything is just markdown. Delete this note whenever you want to start your own vault.',
     '',
-    'Sketching the pipeline before writing any code. Draw directly below — everything stays in this note.',
+    '## A few things to try',
     '',
-    '```sketch signal-flow',
+    '- Hit the **✎ edit** button (top-right) and type `/` for headings, tables, to-dos, and more',
+    '- Link notes with `[[double brackets]]` and tag with `#ideas`',
+    '- [ ] Tick a to-do like this one',
+    '- [x] See it cross off',
+    '',
+    'Draw right inside a note — this canvas is a full Excalidraw board:',
+    '',
+    '```sketch welcome',
     '```',
     '',
-    '## Open questions',
-    '',
-    '- [ ] Latency budget — is 90ms actually perceivable?',
-    '- [x] Dry electrodes vs gel for daily wear',
-    '- [ ] Fallback when decoder confidence drops below 0.6',
-  ].join('\n'),
-  neural: [
-    'Non-invasive EEG only — nobody is drilling holes for a cursor. A dry-electrode headband over the motor cortex gives the cleanest motor-imagery signal for the [[Brain–Computer UI]] decoder. #bci #research',
-    '',
-    '## Electrode placement',
-    '',
-    'Two papers worth keeping: *Ferrante et al.* on C3/C4 montages for imagined movement, and the Graz-BCI review comparing dry against gel drift over long sessions. Both argue that **placement beats filtering**.',
-    '',
-    'Open thread: comfort. Anything that feels like a lab rig loses to a headband people forget they are wearing. More candidates collected in [[Reading List]].',
-  ].join('\n'),
-  reading: [
-    'Queue for the [[Neural Interfaces]] deep-dive, roughly in order. #research',
-    '',
-    '1. A Primer on Motor Imagery Decoding',
-    '2. EEG artifact rejection in the wild',
-    '3. The 100ms rule for direct-manipulation interfaces',
-    '4. Latency-budget notes for [[Brain–Computer UI]]',
-  ].join('\n'),
-  sync: [
-    'Thursday agenda: demo the [[Brain–Computer UI]] cursor end-to-end, then settle the dry-vs-gel electrode question before ordering hardware. #team',
-    '',
-    '## Agenda',
-    '',
-    '- [ ] Demo the cursor end-to-end',
-    '- [ ] Decide dry vs gel electrodes',
-    '- [ ] Order hardware for the pilot',
-    '',
-    '> Carry-over from last week: latency looked good on the bench (72–84ms), but nobody has tried it standing up. Add a hallway test before the demo.',
-  ].join('\n'),
-  daily: [
-    'Sketched the signal-flow diagram in [[Brain–Computer UI]] — the decoder box keeps growing, which is probably a sign it should be two boxes. #daily',
-    '',
-    'Quick capture: what if the cursor *eased* toward targets when decoder confidence drops, instead of freezing? Filed in [[Ideas Inbox]].',
-  ].join('\n'),
-  inbox: [
-    'Confidence-weighted cursor easing — degrade gracefully instead of freezing (from [[2026-07-06]]). #inbox',
-    '',
-    '- Sketch blocks anywhere: every note should embed a canvas like [[Brain–Computer UI]] does',
-    '- Publish a note straight to slides from the quick switcher',
+    '> Back up anything you write from **Settings → Export vault**.',
   ].join('\n'),
 };
 
@@ -110,21 +70,8 @@ export function legacySketchToScene(shapes) {
   }
 }
 
-const LEGACY_SIGNAL_FLOW = [
-  { id: 'p1', type: 'rect', x: 56, y: 118, w: 128, h: 62, color: '#e8eaf0' },
-  { id: 'p2', type: 'text', x: 86, y: 156, text: 'EEG cap', color: '#e8eaf0' },
-  { id: 'p3', type: 'arrow', x0: 186, y0: 149, x1: 262, y1: 149, color: '#a78bfa' },
-  { id: 'p4', type: 'ellipse', cx: 328, cy: 149, rx: 64, ry: 38, color: '#5eead4' },
-  { id: 'p5', type: 'text', x: 293, y: 156, text: 'Decoder', color: '#5eead4' },
-  { id: 'p6', type: 'arrow', x0: 394, y0: 149, x1: 468, y1: 149, color: '#a78bfa' },
-  { id: 'p7', type: 'rect', x: 468, y: 118, w: 112, h: 62, color: '#fbbf24' },
-  { id: 'p8', type: 'text', x: 486, y: 156, text: 'Cursor UI', color: '#fbbf24' },
-  { id: 'p9', type: 'text', x: 210, y: 62, text: 'thought → action in <90ms', color: '#8b90a0' },
-  { id: 'p10', type: 'arrow', x0: 305, y0: 74, x1: 322, y1: 104, color: '#8b90a0' },
-];
-
 export function buildInitialSketches() {
-  return { 'signal-flow': legacySketchToScene(LEGACY_SIGNAL_FLOW) };
+  return { [WELCOME_ID]: { elements: [], files: {} } };
 }
 
 export const COLORS = { white: '#e8eaf0', violet: '#a78bfa', teal: '#5eead4', amber: '#fbbf24', red: '#f87171' };

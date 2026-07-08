@@ -63,8 +63,11 @@ export default function App() {
   const [files, setFiles] = useState(saved.files ?? INITIAL_FILES);
   const [docs, setDocs] = useState(saved.docs ?? INITIAL_DOCS);
   const [sketches, setSketches] = useState(() => saved.sketches ?? buildInitialSketches());
-  const [activeFile, setActiveFile] = useState('bci');
-  const [openTabs, setOpenTabs] = useState(['bci', 'reading']);
+  const [activeFile, setActiveFile] = useState((saved.files ?? INITIAL_FILES).find(f => !f.folder)?.id ?? null);
+  const [openTabs, setOpenTabs] = useState(() => {
+    const first = (saved.files ?? INITIAL_FILES).find(f => !f.folder);
+    return first ? [first.id] : [];
+  });
   const [collapsed, setCollapsed] = useState({});
   const [editMode, setEditMode] = useState(false);
 
