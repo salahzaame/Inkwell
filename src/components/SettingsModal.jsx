@@ -79,6 +79,7 @@ export default function SettingsModal({ settings, setSettings, theme, setTheme, 
               </div>
             )}
           />
+          <Row title="Paper page" sub="Notes on a warm paper sheet — Inkwell's signature look" right={<Toggle on={!!theme.paper} />} onClick={() => setTheme(t => ({ ...t, paper: !t.paper }))} />
           <Row title="Canvas grid" sub="Show a grid in sketch blocks" last right={<Toggle on={!!theme.grid} />} onClick={() => setTheme(t => ({ ...t, grid: !t.grid }))} />
         </div>
         <div style={SECTION}>Vault</div>

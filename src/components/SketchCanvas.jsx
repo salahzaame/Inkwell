@@ -13,9 +13,10 @@ const isTyping = () => {
  * Can expand to a full-screen overlay — same component instance, so the scene
  * (and its undo history) survives the toggle.
  */
-export default function SketchCanvas({ sketchId, data, onChange, grid }) {
+export default function SketchCanvas({ sketchId, data, onChange, grid, paper }) {
   const versionRef = useRef(null);
   const [full, setFull] = useState(false);
+  const [api, setApi] = useState(null);
 
   useEffect(() => {
     if (!full) return undefined;
@@ -25,6 +26,17 @@ export default function SketchCanvas({ sketchId, data, onChange, grid }) {
     window.addEventListener('keydown', kd);
     return () => window.removeEventListener('keydown', kd);
   }, [full]);
+
+  // re-fit the drawing whenever the canvas changes size (fullscreen toggle),
+  // so leaving fullscreen never strands the content off-screen
+  useEffect(() => {
+    if (!api) return undefined;
+    const t = setTimeout(() => {
+      const els = api.getSceneElements();
+      if (els.length) api.scrollToContent(els, { fitToViewport: true, viewportZoomFactor: 0.85, animate: false });
+    }, 80);
+    return () => clearTimeout(t);
+  }, [full, api]);
 
   // initialData is only read on mount; memo it so the scene isn't rebuilt every render
   const initialData = useMemo(() => ({
@@ -49,25 +61,33 @@ export default function SketchCanvas({ sketchId, data, onChange, grid }) {
 
   const frame = full
     ? { position: 'fixed', inset: 0, zIndex: 70, background: '#1a1c21', display: 'flex', flexDirection: 'column' }
-    : { border: '1px solid #2c2f37', borderRadius: '12px', background: '#1a1c21', margin: '0 0 30px', overflow: 'hidden', display: 'flex', flexDirection: 'column' };
+    : {
+      border: `1px solid ${paper ? '#e0d7bf' : '#2c2f37'}`, borderRadius: '12px',
+      background: paper ? '#fffdf7' : '#1a1c21', margin: '0 0 30px', overflow: 'hidden',
+      display: 'flex', flexDirection: 'column',
+      boxShadow: paper ? '0 10px 26px -18px rgba(38,34,26,.5)' : 'none',
+    };
+  const headBorder = full ? '#23252b' : (paper ? '#eee7d5' : '#23252b');
+  const labelColor = full ? '#8b90a0' : (paper ? '#8a8272' : '#8b90a0');
+  const hintColor = full ? '#5b6170' : (paper ? '#b3aa93' : '#5b6170');
 
   return (
     <>
       {full && (
-        <div style={{ border: '1px dashed #2c2f37', borderRadius: '12px', margin: '0 0 30px', padding: '24px', textAlign: 'center', color: '#5b6170', fontSize: '13px' }}>
+        <div style={{ border: `1px dashed ${paper ? '#d8cfb6' : '#2c2f37'}`, borderRadius: '12px', margin: '0 0 30px', padding: '24px', textAlign: 'center', color: hintColor, fontSize: '13px' }}>
           ✎ {sketchId}.sketch — open in full screen
         </div>
       )}
       <div style={frame}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: full ? '10px 16px' : '8px 12px', borderBottom: '1px solid #23252b', flexShrink: 0 }}>
-          <span style={{ fontFamily: "'Gochi Hand'", fontSize: '14px', color: '#8b90a0' }}>✎ {sketchId}.sketch</span>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: full ? '10px 16px' : '8px 12px', borderBottom: `1px solid ${headBorder}`, flexShrink: 0 }}>
+          <span style={{ fontFamily: "'Gochi Hand'", fontSize: '14px', color: labelColor }}>✎ {sketchId}.sketch</span>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <span style={{ fontSize: '10.5px', color: '#5b6170' }}>excalidraw canvas</span>
+            <span style={{ fontSize: '10.5px', color: hintColor }}>excalidraw canvas</span>
             <div
-              className="hv-tool"
+              className={paper && !full ? 'hv-tool-paper' : 'hv-tool'}
               title={full ? 'Exit full screen  (Esc)' : 'Full screen'}
               onClick={() => setFull(f => !f)}
-              style={{ width: '24px', height: '24px', borderRadius: '6px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#8b90a0', cursor: 'pointer' }}
+              style={{ width: '24px', height: '24px', borderRadius: '6px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: labelColor, cursor: 'pointer' }}
             >
               {full
                 ? <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5" /></svg>
@@ -78,6 +98,7 @@ export default function SketchCanvas({ sketchId, data, onChange, grid }) {
         <div style={full ? { flex: 1, minHeight: 0 } : { height: '440px' }}>
           <Excalidraw
             theme="light"
+            excalidrawAPI={setApi}
             initialData={initialData}
             onChange={handleChange}
             gridModeEnabled={grid}

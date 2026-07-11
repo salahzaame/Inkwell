@@ -13,19 +13,23 @@ npm run dev
 
 Then open http://localhost:5173.
 
-## Notes (markdown)
+## Notes (markdown, live editing)
 
 - Every note is a markdown document, persisted to `localStorage`.
-- **Preview / source toggle** in the editor header (pencil / eye icon).
-- **Slash commands** (Notion-style): type `/` at the start of a line while
-  editing to open the block menu — `/h1`–`/h3`, `/bullet`, `/number`, `/todo`,
-  `/table`, `/quote`, `/code`, `/divider`, `/sketch`. Arrow keys + Enter or
-  click to insert; keep typing to filter.
+- **Live block editing** (Notion-style): the page is always rendered — click
+  any block to edit it in place; it commits and re-renders when you leave it.
+  Enter splits blocks (and continues lists), Backspace at the start merges,
+  arrow keys move between blocks.
+- **The paper page**: notes render on a warm, grainy paper sheet with serif
+  ink headings — Inkwell's signature look (toggleable in Settings).
+- **Slash commands**: type `/` at the start of a line to open the block menu —
+  `/h1`–`/h3`, `/bullet`, `/number`, `/todo`, `/table`, `/quote`, `/code`,
+  `/divider`, `/sketch`. Arrow keys + Enter or click to insert.
 - Supported syntax: `#`–`###` headings, paragraphs, `- ` / `1. ` lists,
-  `- [ ]` task checkboxes (toggleable from the preview — they rewrite the
-  source), `| a | b |` tables, `> ` quotes, `---` rules, code fences,
-  `**bold**`, `*italic*`, `` `code` ``, `[text](url)` links, `[[Wikilinks]]`,
-  and `#tags`.
+  `- [ ]` task checkboxes (toggleable right in the page), `| a | b |` tables,
+  `> ` quotes, `---` rules, code fences, `**bold**`, `*italic*`, `` `code` ``,
+  `[text](url)` links, `[[Wikilinks]]` (rendered as plain colored links, no
+  brackets), and `#tags`.
 - **Create** notes with the `+` button, or by clicking a `[[wikilink]]` to a
   note that doesn't exist yet (Obsidian-style).
 - **Rename** by editing the title — wikilinks across the vault are rewritten.
@@ -45,6 +49,8 @@ editor (MIT). Add one anywhere with the toolbar button or a fence:
 - Full Excalidraw feature set: selection, multi-select, move/resize/rotate,
   freedraw, shapes, arrows with bindings, text, images, undo/redo, zoom, and
   all its keyboard shortcuts.
+- **Full-screen mode** per sketch (expand icon or Esc to exit); the drawing is
+  automatically re-fit into view when the canvas changes size.
 - Scenes are stored per fence id in the vault (`localStorage`), and sketches
   from the pre-Excalidraw format are migrated automatically.
 - Slide thumbnails and present mode render scenes with Excalidraw's

@@ -21,7 +21,7 @@ export const INITIAL_DOCS = {
     '',
     '## A few things to try',
     '',
-    '- Hit the **✎ edit** button (top-right) and type `/` for headings, tables, to-dos, and more',
+    '- Click any line to edit it in place — type `/` for headings, tables, to-dos, and more',
     '- Link notes with `[[double brackets]]` and tag with `#ideas`',
     '- [ ] Tick a to-do like this one',
     '- [x] See it cross off',

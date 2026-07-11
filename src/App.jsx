@@ -69,13 +69,12 @@ export default function App() {
     return first ? [first.id] : [];
   });
   const [collapsed, setCollapsed] = useState({});
-  const [editMode, setEditMode] = useState(false);
 
   const [switcherOpen, setSwitcherOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settings, setSettings] = useState(saved.settings ?? { localAi: true, sync: false, spell: true, vim: false });
-  const [theme, setTheme] = useState(saved.theme ?? { accent: '#fbbf24', grid: true });
+  const [theme, setTheme] = useState({ accent: '#fbbf24', grid: true, paper: true, ...(saved.theme || {}) });
 
   const [slideTemplate, setSlideTemplate] = useState('dark');
   const [importNote, setImportNote] = useState(false);
@@ -145,7 +144,6 @@ export default function App() {
     setActiveFile(id);
     setView('editor');
     setSwitcherOpen(false);
-    setEditMode((docs[id] ?? '') === '');
     setOpenTabs(t => (t.includes(id) ? t : [...t, id]));
   };
 
@@ -158,7 +156,6 @@ export default function App() {
     setDocs(d => ({ ...d, [id]: '' }));
     setActiveFile(id);
     setView('editor');
-    setEditMode(true);
     setOpenTabs(t => [...t, id]);
   };
 
@@ -185,7 +182,6 @@ export default function App() {
     setOpenTabs(t => [...t, id]);
     setActiveFile(id);
     setView('editor');
-    setEditMode(true);
   };
 
   /** Rename a note and rewrite [[wikilinks]] pointing at it across the vault. */
@@ -306,14 +302,13 @@ export default function App() {
           {view === 'editor' && (
             <Editor
               note={activeNote} crumb={crumb} doc={activeDoc} files={files} docs={docs}
-              editMode={editMode} setEditMode={setEditMode}
               onDocChange={(text) => activeNote && updateDoc(activeNote.id, text)}
               onWiki={openWiki} onOpen={openFile} onRename={renameFile}
               onDelete={() => activeNote && deleteNote(activeNote.id)}
               onInsertSketch={() => activeNote && insertSketch(activeNote.id)}
               onCreateSketch={createSketch}
               onNewNote={newNote}
-              spell={settings.spell} grid={theme.grid}
+              spell={settings.spell} grid={theme.grid} paper={theme.paper} accent={theme.accent}
               sketches={sketches} setSketchData={setSketchData}
             />
           )}

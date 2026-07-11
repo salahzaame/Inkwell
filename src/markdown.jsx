@@ -8,7 +8,15 @@ export function parseBlocks(text) {
   const blocks = [];
   let i = 0;
   let taskIx = 0;
+  // every block records its source line range [line0, line1) so the editor can
+  // map rendered blocks back onto the raw document
+  const push = (b, line0) => {
+    b.line0 = line0;
+    b.line1 = Math.min(i, lines.length);
+    blocks.push(b);
+  };
   while (i < lines.length) {
+    const start = i;
     const l = lines[i];
     if (/^```/.test(l)) {
       const m = l.match(/^```sketch\s+(\S+)/);
@@ -16,16 +24,16 @@ export function parseBlocks(text) {
       const buf = [];
       while (i < lines.length && !/^```/.test(lines[i])) { buf.push(lines[i]); i++; }
       i++; // closing fence
-      blocks.push(m ? { t: 'sketch', id: m[1] } : { t: 'code', text: buf.join('\n') });
+      push(m ? { t: 'sketch', id: m[1] } : { t: 'code', text: buf.join('\n') }, start);
       continue;
     }
     const h = l.match(/^(#{1,3})\s+(.*)$/);
-    if (h) { blocks.push({ t: 'h' + h[1].length, text: h[2] }); i++; continue; }
-    if (/^---+\s*$/.test(l)) { blocks.push({ t: 'hr' }); i++; continue; }
+    if (h) { i++; push({ t: 'h' + h[1].length, text: h[2] }, start); continue; }
+    if (/^---+\s*$/.test(l)) { i++; push({ t: 'hr' }, start); continue; }
     if (/^>\s?/.test(l)) {
       const buf = [];
       while (i < lines.length && /^>\s?/.test(lines[i])) { buf.push(lines[i].replace(/^>\s?/, '')); i++; }
-      blocks.push({ t: 'quote', text: buf.join(' ') });
+      push({ t: 'quote', text: buf.join(' ') }, start);
       continue;
     }
     if (/^\s*\|.*\|\s*$/.test(l) && i + 1 < lines.length && /^\s*\|[\s:|-]+\|\s*$/.test(lines[i + 1])) {
@@ -34,7 +42,7 @@ export function parseBlocks(text) {
       i += 2; // skip header + separator
       const rows = [];
       while (i < lines.length && /^\s*\|.*\|\s*$/.test(lines[i])) { rows.push(parseRow(lines[i])); i++; }
-      blocks.push({ t: 'table', header, rows });
+      push({ t: 'table', header, rows }, start);
       continue;
     }
     if (/^\s*([-*]|\d+\.)\s+/.test(l)) {
@@ -47,7 +55,7 @@ export function parseBlocks(text) {
         else items.push({ text: li.replace(/^\s*([-*]|\d+\.)\s+/, '') });
         i++;
       }
-      blocks.push({ t: 'list', ordered, items });
+      push({ t: 'list', ordered, items }, start);
       continue;
     }
     if (l.trim() === '') { i++; continue; }
@@ -57,7 +65,7 @@ export function parseBlocks(text) {
       buf.push(lines[i]);
       i++;
     }
-    blocks.push({ t: 'p', text: buf.join(' ') });
+    push({ t: 'p', text: buf.join(' ') }, start);
   }
   return blocks;
 }
@@ -82,15 +90,16 @@ export function Inline({ text, onWiki }) {
     if (m.index > last) out.push(text.slice(last, m.index));
     const s = m[0];
     if (m[1]) {
+      // wikilinks render as plain colored links — the [[brackets]] stay in the source only
       const name = s.slice(2, -2);
       out.push(
         <a key={k++} href="#" style={LINK_STYLE} onClick={(e) => { e.preventDefault(); e.stopPropagation(); onWiki && onWiki(name); }}>
-          [[{name}]]
+          {name}
         </a>,
       );
     } else if (m[2]) out.push(<strong key={k++}>{s.slice(2, -2)}</strong>);
     else if (m[3]) out.push(<em key={k++}>{s.slice(1, -1)}</em>);
-    else if (m[4]) out.push(<code key={k++} style={{ background: '#26292f', borderRadius: '4px', padding: '1px 5px', fontSize: '.9em' }}>{s.slice(1, -1)}</code>);
+    else if (m[4]) out.push(<code key={k++} style={{ background: 'color-mix(in srgb, currentColor 9%, transparent)', border: '1px solid color-mix(in srgb, currentColor 12%, transparent)', borderRadius: '4px', padding: '1px 5px', fontSize: '.88em', fontFamily: 'ui-monospace, Consolas, monospace' }}>{s.slice(1, -1)}</code>);
     else if (m[5]) {
       const lm = s.match(/^\[([^\]]+)\]\(([^)]+)\)$/);
       out.push(<a key={k++} href={lm[2]} target="_blank" rel="noreferrer" style={LINK_STYLE}>{lm[1]}</a>);

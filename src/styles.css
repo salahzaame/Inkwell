@@ -37,3 +37,14 @@ input, textarea { font-family: 'Instrument Sans', system-ui, sans-serif; }
 .tree-del:hover { background: #2c2f37; color: #f87171 !important; }
 
 textarea::placeholder { color: #4a4f5c; }
+
+/* live block editor */
+.blk-ta {
+  width: 100%; display: block; background: transparent; border: none; outline: none;
+  resize: none; padding: 0; overflow: hidden;
+}
+.blk-ta::placeholder { color: currentColor; opacity: .35; }
+
+/* toolbar hovers on the paper sheet */
+.hv-tool-paper:hover { background: #ece5d3 !important; color: #26221a !important; }
+.hv-danger-paper:hover { background: #ece5d3 !important; color: #c92a2a !important; }
