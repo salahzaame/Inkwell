@@ -238,7 +238,14 @@ export default function App() {
   };
 
   const setSketchData = (skId, data) => {
-    setSketches(s => ({ ...s, [skId]: data }));
+    setSketches(s => {
+      if (data == null) {
+        const out = { ...s };
+        delete out[skId];
+        return out;
+      }
+      return { ...s, [skId]: data };
+    });
   };
 
   const sendMessage = async (text) => {

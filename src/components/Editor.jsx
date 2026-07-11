@@ -29,8 +29,8 @@ const SLASH_COMMANDS = [
   { id: 'table', label: 'Table', glyph: '⊞', snippet: '| Column 1 | Column 2 | Column 3 |\n| --- | --- | --- |\n|   |   |   |\n|   |   |   |\n', caretOffset: 2 },
   { id: 'quote', label: 'Quote', glyph: '❝', snippet: '> ' },
   { id: 'code', label: 'Code block', glyph: '</>', snippet: '```\n\n```\n', caretOffset: 4 },
-  { id: 'divider', label: 'Divider', glyph: '—', snippet: '---\n\n' },
-  { id: 'sketch', label: 'Sketch (Excalidraw)', glyph: '✎', sketch: true },
+  { id: 'divider', label: 'Divider', glyph: '—', snippet: '---\n\n', commitBlock: true },
+  { id: 'sketch', label: 'Sketch (Excalidraw)', glyph: '✎', sketch: true, commitBlock: true },
 ];
 
 /** Pixel position of the textarea caret, via the hidden-mirror technique. */
@@ -318,6 +318,15 @@ export default function Editor({
     setDraft(draft.slice(0, c) + text + draft.slice(ta.selectionEnd));
   };
 
+  /** Remove a sketch block: drop its fence from the doc and its scene from the vault. */
+  const deleteSketchBlock = (b) => {
+    if (!window.confirm(`Delete ${b.id}.sketch? The drawing will be lost.`)) return;
+    if (focus) { setFocus(null); setSlash(null); }
+    const L = linesOf(doc);
+    onDocChange([...L.slice(0, b.line0), ...L.slice(b.line1)].join('\n'));
+    setSketchData(b.id, null);
+  };
+
   const appendAtEnd = () => {
     const endLine = 1e9;
     if (focus) {
@@ -356,6 +365,14 @@ export default function Editor({
     if (!ta || !slash) return;
     const caret = ta.selectionStart;
     const snippet = cmd.sketch ? '```sketch ' + onCreateSketch() + '\n```\n' : cmd.snippet;
+    if (cmd.commitBlock) {
+      // whole-block inserts (sketch, divider) commit instantly so they render
+      // right away, with the caret moving to a fresh block underneath
+      const newSrc = (draft.slice(0, slash.start) + snippet + draft.slice(caret)).replace(/\n+$/, '');
+      setSlash(null);
+      splitCommit(newSrc, '');
+      return;
+    }
     draftCaretRef.current = slash.start + (cmd.caretOffset ?? snippet.length);
     setSlash(null);
     setDraft(draft.slice(0, slash.start) + snippet + draft.slice(caret));
@@ -528,6 +545,7 @@ export default function Editor({
           paper={paper}
           data={sketches[b.id]}
           onChange={(d) => setSketchData(b.id, d)}
+          onDelete={() => deleteSketchBlock(b)}
         />,
       );
       return;
@@ -573,7 +591,7 @@ export default function Editor({
             <div style={{ fontSize: '12px', color: pal.faint }}>
               {crumb} <span style={{ margin: '0 4px' }}>/</span> <span style={{ color: pal.muted }}>{note.name}</span>
             </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '2px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '2px' }} onMouseDown={(e) => e.preventDefault()}>
               <div className={toolCls} title="Insert sketch block" onClick={onInsertSketch} style={iconBtn}>
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="14" rx="2" /><path d="M8 14l2.5-3 2 2.4L15.5 9l2.5 5" /></svg>
               </div>

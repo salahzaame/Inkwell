@@ -13,7 +13,7 @@ const isTyping = () => {
  * Can expand to a full-screen overlay — same component instance, so the scene
  * (and its undo history) survives the toggle.
  */
-export default function SketchCanvas({ sketchId, data, onChange, grid, paper }) {
+export default function SketchCanvas({ sketchId, data, onChange, onDelete, grid, paper }) {
   const versionRef = useRef(null);
   const [full, setFull] = useState(false);
   const [api, setApi] = useState(null);
@@ -83,6 +83,17 @@ export default function SketchCanvas({ sketchId, data, onChange, grid, paper }) 
           <span style={{ fontFamily: "'Gochi Hand'", fontSize: '14px', color: labelColor }}>✎ {sketchId}.sketch</span>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <span style={{ fontSize: '10.5px', color: hintColor }}>excalidraw canvas</span>
+            {!full && onDelete && (
+              <div
+                className={paper ? 'hv-danger-paper' : 'hv-danger'}
+                title="Delete sketch"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={onDelete}
+                style={{ width: '24px', height: '24px', borderRadius: '6px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: labelColor, cursor: 'pointer' }}
+              >
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><path d="M4 7h16M9 7V4h6v3M6.5 7l1 13h9l1-13" /></svg>
+              </div>
+            )}
             <div
               className={paper && !full ? 'hv-tool-paper' : 'hv-tool'}
               title={full ? 'Exit full screen  (Esc)' : 'Full screen'}
