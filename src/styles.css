@@ -48,3 +48,155 @@ textarea::placeholder { color: #4a4f5c; }
 /* toolbar hovers on the paper sheet */
 .hv-tool-paper:hover { background: #ece5d3 !important; color: #26221a !important; }
 .hv-danger-paper:hover { background: #ece5d3 !important; color: #c92a2a !important; }
+
+/* Panel resizers hover glow */
+.sidebar-resizer:hover {
+  background: var(--acc, #fbbf24) !important;
+}
+.ai-resizer:hover {
+  background: var(--acc, #fbbf24) !important;
+}
+.split-gutter:hover .gutter-handle {
+  background: var(--acc, #fbbf24) !important;
+}
+
+/* PDF + note workspace — a deliberate ink seam, not an IDE divider. */
+.workspace-split {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  background: #16171a;
+  overflow: hidden;
+}
+.workspace-pane,
+.workspace-editor-panel,
+.workspace-single-panel {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  overflow: hidden;
+}
+.workspace-pane { flex-grow: 0; flex-shrink: 1; }
+.workspace-pane > *,
+.workspace-editor-panel > *,
+.workspace-single-panel > * { flex: 1; min-width: 0; }
+.workspace-single-panel { flex: 1; }
+.workspace-return-split {
+  position: absolute;
+  z-index: 12;
+  top: 12px;
+  right: 16px;
+  border: 1px solid #5c4a2f;
+  border-radius: 999px;
+  padding: 6px 11px;
+  background: rgba(37, 32, 24, .88);
+  backdrop-filter: blur(10px);
+  color: #dbc28e;
+  font-family: 'Gochi Hand', cursive;
+  font-size: 14px;
+  cursor: pointer;
+  box-shadow: 0 5px 16px rgba(0,0,0,.2);
+  transform: rotate(-1deg);
+  transition: transform .15s ease, background .15s ease, color .15s ease;
+}
+.workspace-return-split:hover {
+  transform: rotate(1deg) translateY(-1px);
+  background: color-mix(in oklab, var(--acc, #fbbf24) 20%, #252018);
+  color: #fff1c8;
+}
+
+.split-gutter {
+  position: relative;
+  z-index: 4;
+  width: 13px;
+  flex: 0 0 13px;
+  margin: 0 -6px;
+  cursor: col-resize;
+  touch-action: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  outline: none;
+}
+.split-gutter::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 6px;
+  width: 1px;
+  background: linear-gradient(to bottom, transparent, #36302a 8%, #5d4e37 50%, #36302a 92%, transparent);
+  transition: width .15s ease, background .15s ease, box-shadow .15s ease;
+}
+.gutter-handle {
+  position: relative;
+  z-index: 1;
+  width: 20px;
+  height: 48px;
+  border-radius: 10px;
+  background: #25211c;
+  border: 1px solid #4a3d2b;
+  box-shadow: 0 5px 18px rgba(0, 0, 0, .24);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  opacity: .72;
+  transform: scale(.88);
+  transition: transform .15s ease, opacity .15s ease, background .15s ease, border-color .15s ease;
+}
+.gutter-handle i {
+  display: block;
+  width: 7px;
+  height: 1.5px;
+  background: #9a7c46;
+  border-radius: 99px;
+  transform: rotate(-3deg);
+}
+.gutter-handle i:nth-child(2) { width: 9px; transform: rotate(2deg); }
+.gutter-handle i:nth-child(3) { width: 6px; transform: rotate(-1deg); }
+.split-gutter:hover::before,
+.split-gutter:focus-visible::before,
+.workspace-split.is-dragging .split-gutter::before {
+  width: 2px;
+  background: var(--acc, #fbbf24);
+  box-shadow: 0 0 16px color-mix(in oklab, var(--acc, #fbbf24) 50%, transparent);
+}
+.split-gutter:hover .gutter-handle,
+.split-gutter:focus-visible .gutter-handle,
+.workspace-split.is-dragging .gutter-handle {
+  transform: scale(1);
+  opacity: 1;
+  background: #34291d;
+  border-color: color-mix(in oklab, var(--acc, #fbbf24) 68%, #59472e);
+}
+.gutter-tip {
+  pointer-events: none;
+  position: absolute;
+  top: 50%;
+  left: calc(100% + 7px);
+  transform: translateY(-50%) translateX(-5px);
+  opacity: 0;
+  white-space: nowrap;
+  padding: 5px 8px;
+  border: 1px solid #494038;
+  border-radius: 7px;
+  background: rgba(29, 27, 23, .92);
+  color: #d4c39f;
+  font-family: 'Gochi Hand', cursive;
+  font-size: 13px;
+  transition: opacity .15s ease, transform .15s ease;
+}
+.split-gutter:hover .gutter-tip,
+.split-gutter:focus-visible .gutter-tip { opacity: 1; transform: translateY(-50%) translateX(0); }
+.workspace-split.is-dragging { user-select: none; }
+.workspace-split.is-dragging * { cursor: col-resize !important; }
+
+@media (max-width: 760px) {
+  .workspace-split { flex-direction: column; overflow-y: auto; }
+  .workspace-pane { flex: 0 0 auto !important; min-height: 54vh; }
+  .workspace-pane-note { min-height: 64vh; }
+  .split-gutter { display: none; }
+}

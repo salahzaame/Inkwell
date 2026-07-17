@@ -7,7 +7,7 @@ const btn = (on) => ({
   background: on ? 'color-mix(in oklab, var(--acc) 14%, transparent)' : 'transparent',
 });
 
-export default function IconRail({ rail, onFiles, onSearch, onGraph, onSlides, onAI, onSettings }) {
+export default function IconRail({ rail, onFiles, onSearch, onGraph, onSlides, onResearch, onAI, onSettings, onFocusMode }) {
   return (
     <div style={{ width: '46px', background: '#141518', borderRight: '1px solid #23252b', display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '10px 0', gap: '4px', flexShrink: 0 }}>
       <div style={{ width: '30px', height: '30px', marginBottom: '8px', borderRadius: '8px', background: 'color-mix(in oklab, var(--acc) 16%, transparent)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -25,10 +25,18 @@ export default function IconRail({ rail, onFiles, onSearch, onGraph, onSlides, o
       <div className="hv-item" onClick={onSlides} title="Slides" style={btn(rail.slides)}>
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="12" rx="2" /><path d="M12 16v3M8 21h8" /></svg>
       </div>
+      <div className="hv-item" onClick={onResearch} title="Research Library" style={btn(rail.research)}>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20M4 19.5A2.5 2.5 0 0 0 6.5 22H20M4 19.5v-15A2.5 2.5 0 0 1 6.5 2M20 4v18" /><path d="M6 6h10M6 10h10" /></svg>
+      </div>
       <div className="hv-item" onClick={onAI} title="Assistant" style={btn(rail.ai)}>
         <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 3l1.9 5.4L19.5 10l-5.6 1.9L12 17.5l-1.9-5.6L4.5 10l5.6-1.6zM19 15l.9 2.4 2.4.9-2.4.9L19 21.5l-.9-2.3-2.4-.9 2.4-.9z" /></svg>
       </div>
       <div style={{ flex: 1 }} />
+      <div className="hv-item" onClick={onFocusMode} title="Zen Focus Mode" style={btn(rail.focusMode)}>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" />
+        </svg>
+      </div>
       <div className="hv-item" onClick={onSettings} title="Settings" style={btn(rail.settings)}>
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round"><path d="M4 7h16M4 12h16M4 17h16" /><circle cx="9" cy="7" r="2" fill="#141518" /><circle cx="15" cy="12" r="2" fill="#141518" /><circle cx="7" cy="17" r="2" fill="#141518" /></svg>
       </div>

@@ -124,10 +124,49 @@ function RenderedBlock({ b, pal, doc, onDocChange, onWiki }) {
   return null;
 }
 
+function generateBibliography(docText, references) {
+  const regex = /\[@([a-zA-Z0-9_-]+)\]/g;
+  const citationKeys = new Set();
+  let match;
+  while ((match = regex.exec(docText)) !== null) {
+    citationKeys.add(match[1]);
+  }
+  
+  if (citationKeys.size === 0) {
+    alert("No citations (e.g. [@citekey]) found in this note. Write citations first!");
+    return docText;
+  }
+  
+  const formattedRefs = [];
+  for (const key of citationKeys) {
+    const ref = references.find(r => r.citationKey === key);
+    if (ref) {
+      const authorStr = ref.authors && ref.authors.length > 0
+        ? (ref.authors.length > 1 
+            ? ref.authors.slice(0, -1).join(', ') + ' & ' + ref.authors[ref.authors.length - 1] 
+            : ref.authors[0])
+        : 'Unknown Author';
+      const yearStr = ref.year ? ` (${ref.year})` : ' (n.d.)';
+      const titleStr = ref.title ? ` *${ref.title.trim()}*` : '';
+      const journalStr = ref.journal ? `, ${ref.journal.trim()}` : '';
+      const urlStr = ref.url ? ` [Source](${ref.url})` : '';
+      formattedRefs.push(`- **${key}**: ${authorStr}${yearStr}.${titleStr}${journalStr}.${urlStr}`);
+    } else {
+      formattedRefs.push(`- **${key}**: Reference details not found in vault.`);
+    }
+  }
+  
+  const parts = docText.split(/\n## References/i);
+  const cleanDoc = parts[0].trim();
+  const bibContent = `\n\n## References\n\n` + formattedRefs.join('\n') + '\n';
+  return cleanDoc + bibContent;
+}
+
 export default function Editor({
   note, crumb, doc, files, docs,
   onDocChange, onWiki, onOpen, onRename, onDelete, onInsertSketch, onCreateSketch, onNewNote,
   spell, grid, paper, accent, sketches, setSketchData,
+  references = [],
 }) {
   const taRef = useRef(null);
   const caretRef = useRef(null);        // caret to apply after (re)focus: number | 'end'
@@ -137,6 +176,8 @@ export default function Editor({
   const [draft, setDraft] = useState('');
   const [slash, setSlash] = useState(null);
   const [selIx, setSelIx] = useState(0);
+  const [citeMenu, setCiteMenu] = useState(null);
+  const [citeIx, setCiteIx] = useState(0);
 
   const pal = paper ? PAL.paper : PAL.dark;
   const blocks = parseBlocks(doc);
@@ -378,6 +419,50 @@ export default function Editor({
     setDraft(draft.slice(0, slash.start) + snippet + draft.slice(caret));
   };
 
+  /* ── citation autocomplete ── */
+
+  const citeFiltered = citeMenu && references
+    ? references.filter(r => r.citationKey.toLowerCase().includes(citeMenu.query.toLowerCase()) || r.title.toLowerCase().includes(citeMenu.query.toLowerCase()))
+    : [];
+  const citeMenuIx = Math.min(citeIx, Math.max(0, citeFiltered.length - 1));
+
+  const detectCiteMenu = (ta) => {
+    const caret = ta.selectionStart;
+    const m = ta.value.slice(0, caret).match(/(^|\s)\[@([a-zA-Z0-9_-]*)$/);
+    if (m) {
+      const start = caret - m[0].length;
+      const pos = caretPos(ta);
+      setCiteMenu(prev => {
+        if (!prev || prev.start !== start) setCiteIx(0);
+        return { start, matchText: m[0], prefix: m[1], query: m[2], x: pos.x, y: pos.y };
+      });
+    } else {
+      setCiteMenu(null);
+    }
+  };
+
+  const applyCitation = (ref) => {
+    const ta = taRef.current;
+    if (!ta || !citeMenu) return;
+    const caret = ta.selectionStart;
+    const citationText = citeMenu.prefix + `[@${ref.citationKey}]`;
+    draftCaretRef.current = citeMenu.start + citationText.length;
+    setDraft(draft.slice(0, citeMenu.start) + citationText + draft.slice(caret));
+    setCiteMenu(null);
+  };
+
+  const handleGenBibliography = () => {
+    const currentText = focus ? draft : doc;
+    const newText = generateBibliography(currentText, references);
+    if (newText !== currentText) {
+      if (focus) {
+        setDraft(newText);
+      } else {
+        onDocChange(newText);
+      }
+    }
+  };
+
   /* ── textarea key handling ── */
 
   const onTaKeyDown = (e) => {
@@ -390,6 +475,15 @@ export default function Editor({
       if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); setSlash(null); return; }
     } else if (slash && e.key === 'Escape') {
       e.preventDefault(); e.stopPropagation(); setSlash(null); return;
+    }
+
+    if (citeMenu && citeFiltered.length > 0) {
+      if (e.key === 'ArrowDown') { e.preventDefault(); setCiteIx((citeMenuIx + 1) % citeFiltered.length); return; }
+      if (e.key === 'ArrowUp') { e.preventDefault(); setCiteIx((citeMenuIx - 1 + citeFiltered.length) % citeFiltered.length); return; }
+      if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); applyCitation(citeFiltered[citeMenuIx]); return; }
+      if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); setCiteMenu(null); return; }
+    } else if (citeMenu && e.key === 'Escape') {
+      e.preventDefault(); e.stopPropagation(); setCiteMenu(null); return;
     }
 
     if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); commitBlur(); return; }
@@ -490,13 +584,19 @@ export default function Editor({
         value={draft}
         spellCheck={spell}
         placeholder={focus && focus.virtual ? 'Type "/" for blocks, or just write…' : ''}
-        onChange={(e) => { setDraft(e.target.value); detectSlash(e.target); }}
+        onChange={(e) => { setDraft(e.target.value); detectSlash(e.target); detectCiteMenu(e.target); }}
         onKeyDown={onTaKeyDown}
-        onKeyUp={(e) => { if (slash && ['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) detectSlash(e.target); }}
-        onClick={(e) => { if (slash) detectSlash(e.target); }}
+        onKeyUp={(e) => { 
+          if (slash && ['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) detectSlash(e.target); 
+          if (citeMenu && ['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) detectCiteMenu(e.target);
+        }}
+        onClick={(e) => { 
+          if (slash) detectSlash(e.target); 
+          if (citeMenu) detectCiteMenu(e.target);
+        }}
         onBlur={() => setTimeout(() => {
           const ae = document.activeElement;
-          if (ae !== taRef.current && !(ae && ae.closest && ae.closest('.slash-menu'))) commitBlur();
+          if (ae !== taRef.current && !(ae && ae.closest && (ae.closest('.slash-menu') || ae.closest('.cite-menu')))) commitBlur();
         }, 90)}
         style={editStyleFor(b)}
       />
@@ -523,6 +623,37 @@ export default function Editor({
               <span style={{ width: '26px', height: '26px', borderRadius: '6px', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#1a1c21', border: '1px solid #2c2f37', fontSize: '11px', fontWeight: 600, color: '#8b90a0', fontFamily: 'ui-monospace, Consolas, monospace' }}>{c.glyph}</span>
               <span style={{ flex: 1 }}>{c.label}</span>
               <span style={{ fontSize: '10.5px', color: '#5b6170', fontFamily: 'ui-monospace, Consolas, monospace' }}>/{c.id}</span>
+            </div>
+          ))}
+        </div>
+      )}
+      {citeMenu && citeFiltered.length > 0 && (
+        <div className="cite-menu" style={{
+          position: 'absolute', top: citeMenu.y + 'px', left: `min(${citeMenu.x}px, calc(100% - 280px))`,
+          width: '280px', maxHeight: '200px', overflowY: 'auto', zIndex: 30,
+          background: '#1e2025', border: '1px solid #2c2f37', borderRadius: '10px',
+          boxShadow: '0 16px 44px rgba(0,0,0,.55)', padding: '5px', animation: 'popIn .1s ease-out',
+        }}>
+          <div style={{ fontSize: '10.5px', fontWeight: 600, letterSpacing: '.5px', textTransform: 'uppercase', color: '#5b6170', padding: '5px 9px 4px' }}>Citations</div>
+          {citeFiltered.map((ref, i) => (
+            <div
+              key={ref.citationKey || i}
+              onMouseDown={(e) => { e.preventDefault(); applyCitation(ref); }}
+              onMouseEnter={() => setCiteIx(i)}
+              style={{
+                display: 'flex', flexDirection: 'column', gap: '2px', padding: '6px 9px',
+                borderRadius: '7px', cursor: 'pointer', fontSize: '12px',
+                background: i === citeMenuIx ? '#26292f' : 'transparent',
+                color: i === citeMenuIx ? '#dadde5' : '#c3c7d1',
+              }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontWeight: 600, color: 'var(--acc)' }}>@{ref.citationKey}</span>
+                <span style={{ fontSize: '10px', color: '#5b6170' }}>{ref.year}</span>
+              </div>
+              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '11px', color: '#8b90a0' }}>
+                {ref.title}
+              </span>
             </div>
           ))}
         </div>
@@ -592,6 +723,11 @@ export default function Editor({
               {crumb} <span style={{ margin: '0 4px' }}>/</span> <span style={{ color: pal.muted }}>{note.name}</span>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '2px' }} onMouseDown={(e) => e.preventDefault()}>
+              <div className={toolCls} title="Generate Bibliography" onClick={handleGenBibliography} style={iconBtn}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M4 6h16M4 10h16M4 14h16M4 18h16" />
+                </svg>
+              </div>
               <div className={toolCls} title="Insert sketch block" onClick={onInsertSketch} style={iconBtn}>
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="14" rx="2" /><path d="M8 14l2.5-3 2 2.4L15.5 9l2.5 5" /></svg>
               </div>

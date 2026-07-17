@@ -15,6 +15,9 @@ import AIPanel from './components/AIPanel.jsx';
 import QuickSwitcher from './components/QuickSwitcher.jsx';
 import SettingsModal from './components/SettingsModal.jsx';
 import StatusBar from './components/StatusBar.jsx';
+import ResearchPanel from './components/ResearchPanel.jsx';
+import PdfViewer from './components/PdfViewer.jsx';
+import WorkspaceSplit from './components/WorkspaceSplit.jsx';
 
 const saved = (() => {
   try {
@@ -85,6 +88,61 @@ export default function App() {
   const [aiInput, setAiInput] = useState('');
   const [aiTyping, setAiTyping] = useState(false);
   const [aiProvider, setAiProvider] = useState(null); // set after the first real reply
+
+  const [researchOpen, setResearchOpen] = useState(false);
+  const [activePdf, setActivePdf] = useState(null);
+  const [focusMode, setFocusMode] = useState(false);
+  const [workspaceLayout, setWorkspaceLayout] = useState('split'); // 'split' | 'pdf' | 'editor'
+  const [workspaceRatio, setWorkspaceRatio] = useState(() => {
+    const savedRatio = Number(localStorage.getItem('inkwell:workspace-ratio'));
+    return savedRatio >= 0.28 && savedRatio <= 0.72 ? savedRatio : 0.5;
+  });
+  const [references, setReferences] = useState(() => {
+    try {
+      const refs = JSON.parse(localStorage.getItem('inkwell:references'));
+      return refs || [];
+    } catch {
+      return [];
+    }
+  });
+
+  useEffect(() => {
+    localStorage.setItem('inkwell:references', JSON.stringify(references));
+  }, [references]);
+
+  useEffect(() => {
+    localStorage.setItem('inkwell:workspace-ratio', String(workspaceRatio));
+  }, [workspaceRatio]);
+
+  const importReference = (ref) => {
+    const keyExists = references.some(r => r.citationKey === ref.citationKey);
+    if (!keyExists) {
+      setReferences(prev => [...prev, ref]);
+    }
+    const noteId = 'ref-' + ref.citationKey + '-' + Date.now();
+    const noteName = `Lit - ${ref.title.slice(0, 40)}`;
+    const docContent = [
+      `# ${ref.title}`,
+      `\n**Metadata:**`,
+      `- **Authors:** ${ref.authors.join(', ')}`,
+      `- **Year:** ${ref.year || 'n.d.'}`,
+      `- **URL:** ${ref.url}`,
+      `- **DOI:** ${ref.doi || 'N/A'}`,
+      `- **Citation Key:** \`[@${ref.citationKey}]\``,
+      `\n## Abstract`,
+      `${ref.abstract || 'No abstract available.'}`,
+      `\n## BibTeX`,
+      `\`\`\`bibtex\n${ref.bibtex}\n\`\`\``,
+      `\n## Notes`,
+      `- `,
+    ].join('\n');
+
+    setFiles(fs => [...fs, { id: noteId, name: noteName, top: true, mtime: Date.now() }]);
+    setDocs(docsMap => ({ ...docsMap, [noteId]: docContent }));
+    setOpenTabs(t => [...t, noteId]);
+    setActiveFile(noteId);
+    setView('editor');
+  };
 
   // debounced persistence — sketch drags update state at pointer-move rate
   useEffect(() => {
@@ -275,9 +333,43 @@ export default function App() {
     search: switcherOpen,
     graph: view === 'graph',
     slides: view === 'slides',
+    research: researchOpen,
+    focusMode: focusMode,
     ai: aiOpen,
     settings: settingsOpen,
   };
+
+  const editorPanel = (
+    <div className="workspace-editor-panel">
+      <Editor
+        note={activeNote} crumb={crumb} doc={activeDoc} files={files} docs={docs}
+        onDocChange={(text) => activeNote && updateDoc(activeNote.id, text)}
+        onWiki={openWiki} onOpen={openFile} onRename={renameFile}
+        onDelete={() => activeNote && deleteNote(activeNote.id)}
+        onInsertSketch={() => activeNote && insertSketch(activeNote.id)}
+        onCreateSketch={createSketch}
+        onNewNote={newNote}
+        spell={settings.spell} grid={theme.grid} paper={theme.paper} accent={theme.accent}
+        sketches={sketches} setSketchData={setSketchData}
+        references={references}
+      />
+    </div>
+  );
+
+  const pdfPanel = activePdf && (
+    <PdfViewer
+      pdfUrl={activePdf.url}
+      title={activePdf.title}
+      citationKey={activePdf.citationKey}
+      layout={workspaceLayout}
+      onLayoutChange={setWorkspaceLayout}
+      onSendToAi={(text) => {
+        setAiOpen(true);
+        sendMessage(text);
+      }}
+      onClose={() => setActivePdf(null)}
+    />
+  );
 
   return (
     <div style={{
@@ -285,55 +377,118 @@ export default function App() {
       '--acc': theme.accent,
     }}>
       <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
-        <IconRail
-          rail={rail}
-          onFiles={() => { if (view === 'editor') setSidebarOpen(o => !o); else setView('editor'); }}
-          onSearch={() => { setQuery(''); setSwitcherOpen(o => !o); }}
-          onGraph={() => setView('graph')}
-          onSlides={() => setView('slides')}
-          onAI={() => setAiOpen(o => !o)}
-          onSettings={() => setSettingsOpen(true)}
-        />
+        {!focusMode && (
+          <IconRail
+            rail={rail}
+            onFiles={() => {
+              if (view === 'editor') {
+                setSidebarOpen(o => {
+                  const next = !o;
+                  if (next) setResearchOpen(false);
+                  return next;
+                });
+              } else {
+                setView('editor');
+                setResearchOpen(false);
+                setSidebarOpen(true);
+              }
+            }}
+            onSearch={() => { setQuery(''); setSwitcherOpen(o => !o); }}
+            onGraph={() => setView('graph')}
+            onSlides={() => setView('slides')}
+            onResearch={() => setResearchOpen(o => {
+              const next = !o;
+              if (next) setSidebarOpen(false);
+              return next;
+            })}
+            onAI={() => setAiOpen(o => !o)}
+            onSettings={() => setSettingsOpen(true)}
+            onFocusMode={() => setFocusMode(o => !o)}
+          />
+        )}
 
-        {view === 'editor' && sidebarOpen && (
+        {!focusMode && researchOpen && (
+          <ResearchPanel
+            references={references}
+            onImportReference={importReference}
+            onOpenPdf={(url, title, citationKey) => {
+              setActivePdf({ url, title, citationKey });
+              setSidebarOpen(false);
+              setResearchOpen(false);
+              setAiOpen(false);
+              setWorkspaceLayout('split');
+            }}
+            onClose={() => setResearchOpen(false)}
+          />
+        )}
+
+        {!focusMode && view === 'editor' && sidebarOpen && (
           <Sidebar files={files} activeFile={activeFile} collapsed={collapsed} onOpen={openFile} onNewNote={newNote} onDelete={deleteNote} />
         )}
 
-        <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', background: '#1e2025' }}>
-          <TabBar
-            files={files} openTabs={openTabs} activeFile={activeFile} view={view}
-            onClick={(id) => { setActiveFile(id); setView('editor'); }}
-            onClose={closeTab}
-          />
-
-          {view === 'editor' && (
-            <Editor
-              note={activeNote} crumb={crumb} doc={activeDoc} files={files} docs={docs}
-              onDocChange={(text) => activeNote && updateDoc(activeNote.id, text)}
-              onWiki={openWiki} onOpen={openFile} onRename={renameFile}
-              onDelete={() => activeNote && deleteNote(activeNote.id)}
-              onInsertSketch={() => activeNote && insertSketch(activeNote.id)}
-              onCreateSketch={createSketch}
-              onNewNote={newNote}
-              spell={settings.spell} grid={theme.grid} paper={theme.paper} accent={theme.accent}
-              sketches={sketches} setSketchData={setSketchData}
-            />
-          )}
-          {view === 'graph' && <GraphView files={files} docs={docs} onOpen={openFile} />}
-          {view === 'slides' && (
-            <SlidesView
-              noteName={activeNote ? activeNote.name : 'No note'}
-              slides={slides}
-              template={slideTemplate} importNote={importNote} sketches={sketches}
-              onTemplate={(t) => { setSlideTemplate(t); setImportNote(t === 'import'); }}
-              onPresent={() => { setPresent(true); setSlideIx(0); }}
-            />
+        <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', background: '#1e2025', position: 'relative' }}>
+          {focusMode && (
+            <div 
+              onClick={() => setFocusMode(false)}
+              style={{
+                position: 'absolute', top: '16px', right: '18px', zIndex: 99,
+                background: 'rgba(30, 32, 37, 0.82)', backdropFilter: 'blur(8px)',
+                border: '1px solid #2c2f37', borderRadius: '8px', padding: '6px 12px',
+                fontSize: '11px', fontWeight: 600, color: 'var(--acc)', cursor: 'pointer',
+                boxShadow: '0 4px 12px rgba(0,0,0,0.3)', transition: 'all .15s',
+                display: 'flex', alignItems: 'center', gap: '6px'
+              }}
+              className="hv-btn"
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M4 14h6v6M20 10h-6V4M14 10l7-7M10 14l-7 7" />
+              </svg>
+              Exit Focus Mode
+            </div>
           )}
 
-          <StatusBar doc={activeDoc} hasNote={!!activeNote} />
+          {view === 'editor' && activePdf && workspaceLayout === 'editor' && (
+            <button
+              className="workspace-return-split"
+              type="button"
+              onClick={() => setWorkspaceLayout('split')}
+              title="Show the PDF beside this note"
+            >
+              <span aria-hidden="true">↔</span> bring paper back
+            </button>
+          )}
+
+          {!focusMode && (
+            <TabBar
+              files={files} openTabs={openTabs} activeFile={activeFile} view={view}
+              onClick={(id) => { setActiveFile(id); setView('editor'); }}
+              onClose={closeTab}
+            />
+          )}
+
+          <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
+            {view === 'editor' && !activePdf && editorPanel}
+            {view === 'editor' && activePdf && workspaceLayout === 'split' && (
+              <WorkspaceSplit left={pdfPanel} right={editorPanel} initialRatio={workspaceRatio} onRatioChange={setWorkspaceRatio} />
+            )}
+            {view === 'editor' && activePdf && workspaceLayout === 'pdf' && <div className="workspace-single-panel">{pdfPanel}</div>}
+            {view === 'editor' && activePdf && workspaceLayout === 'editor' && editorPanel}
+            {view === 'graph' && <GraphView files={files} docs={docs} onOpen={openFile} />}
+            {view === 'slides' && (
+              <SlidesView
+                noteName={activeNote ? activeNote.name : 'No note'}
+                slides={slides}
+                template={slideTemplate} importNote={importNote} sketches={sketches}
+                onTemplate={(t) => { setSlideTemplate(t); setImportNote(t === 'import'); }}
+                onPresent={() => { setPresent(true); setSlideIx(0); }}
+              />
+            )}
+          </div>
+
+          {!focusMode && <StatusBar doc={activeDoc} hasNote={!!activeNote} />}
         </div>
 
-        {aiOpen && (
+        {!focusMode && aiOpen && (
           <AIPanel
             messages={aiMessages} typing={aiTyping} input={aiInput}
             onInput={setAiInput} onSend={sendMessage} onWiki={openWiki} provider={aiProvider} localAi={settings.localAi}
