@@ -4,36 +4,11 @@ export const isMac = /mac/i.test(navigator.platform);
 export const KBD = isMac ? '⌘K' : 'Ctrl+K';
 
 const DAY = 86400000;
-const now = Date.now();
 
-// A single, deletable welcome note — the only thing a brand-new vault ships with.
-export const WELCOME_ID = 'welcome';
+// A brand-new vault starts empty — content belongs to the user.
+export const INITIAL_FILES = [];
 
-export const INITIAL_FILES = [
-  { id: WELCOME_ID, name: 'Welcome', top: true, mtime: now },
-];
-
-export const INITIAL_DOCS = {
-  [WELCOME_ID]: [
-    '# Welcome to Inkwell 👋',
-    '',
-    'A local-first notebook — your notes live in **this browser**, and everything is just markdown. Delete this note whenever you want to start your own vault.',
-    '',
-    '## A few things to try',
-    '',
-    '- Click any line to edit it in place — type `/` for headings, tables, to-dos, and more',
-    '- Link notes with `[[double brackets]]` and tag with `#ideas`',
-    '- [ ] Tick a to-do like this one',
-    '- [x] See it cross off',
-    '',
-    'Draw right inside a note — this canvas is a full Excalidraw board:',
-    '',
-    '```sketch welcome',
-    '```',
-    '',
-    '> Back up anything you write from **Settings → Export vault**.',
-  ].join('\n'),
-};
+export const INITIAL_DOCS = {};
 
 // Excalidraw stores canonical light-theme colors and inverts them for dark display,
 // so legacy dark-canvas inks map to their light-palette counterparts.
@@ -71,7 +46,7 @@ export function legacySketchToScene(shapes) {
 }
 
 export function buildInitialSketches() {
-  return { [WELCOME_ID]: { elements: [], files: {} } };
+  return {};
 }
 
 export const COLORS = { white: '#e8eaf0', violet: '#a78bfa', teal: '#5eead4', amber: '#fbbf24', red: '#f87171' };

@@ -91,7 +91,15 @@ export default function App() {
   const [aiProvider, setAiProvider] = useState(null); // set after the first real reply
 
   const [researchOpen, setResearchOpen] = useState(false);
-  const [activePdf, setActivePdf] = useState(null); // { url?, localData?, title, citationKey, paperId }
+  const [activePdf, setActivePdf] = useState(null); // { url?, localData?, title, citationKey, paperId, noteId }
+  // which literature note belongs to which paper — keeps local PDFs reattachable
+  const [paperNotes, setPaperNotes] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem('inkwell:paper-notes')) || {};
+    } catch {
+      return {};
+    }
+  });
   const [highlights, setHighlights] = useState(loadHighlightStore);
   const [jumpHl, setJumpHl] = useState(null);
   const [focusMode, setFocusMode] = useState(false);
@@ -118,10 +126,15 @@ export default function App() {
   }, [highlights]);
 
   useEffect(() => {
+    localStorage.setItem('inkwell:paper-notes', JSON.stringify(paperNotes));
+  }, [paperNotes]);
+
+  useEffect(() => {
     localStorage.setItem('inkwell:workspace-ratio', String(workspaceRatio));
   }, [workspaceRatio]);
 
-  /** Save a paper to the library (reading queue) and give it a literature note. */
+  /** Save a paper to the library (reading queue) and give it a literature note.
+      Returns the lit note's id so callers can bind to it without waiting on state. */
   const importReference = (ref) => {
     const pid = paperIdOf(ref);
     const existing = references.find(r => paperIdOf(r) === pid);
@@ -131,8 +144,9 @@ export default function App() {
         setOpenTabs(t => (t.includes(existing.noteId) ? t : [...t, existing.noteId]));
         setActiveFile(existing.noteId);
         setView('editor');
+        return existing.noteId;
       }
-      return;
+      return null;
     }
     const noteId = 'ref-' + ref.citationKey + '-' + Date.now();
     const noteName = `Lit - ${ref.title.slice(0, 40)}`;
@@ -153,21 +167,31 @@ export default function App() {
     ].join('\n');
 
     setReferences(prev => [...prev, { ...ref, noteId, status: 'toread', addedAt: Date.now() }]);
+    setPaperNotes(m => ({ ...m, [pid]: noteId }));
     setFiles(fs => [...fs, { id: noteId, name: noteName, top: true, mtime: Date.now() }]);
     setDocs(docsMap => ({ ...docsMap, [noteId]: docContent }));
     setOpenTabs(t => [...t, noteId]);
     setActiveFile(noteId);
     setView('editor');
+    return noteId;
   };
 
-  /** Open a library paper in the reader; queue status moves to "reading". */
+  /** Open a paper in the reader; queue status moves to "reading". Papers straight
+      from search get imported first, in the same tick, so the note never doubles.
+      The paper opens ONTO its own literature note — other notes stay full-width. */
   const openPaper = (ref) => {
     if (!ref.pdfUrl) return;
     const pid = paperIdOf(ref);
-    setActivePdf({ url: ref.pdfUrl, title: ref.title, citationKey: ref.citationKey, paperId: pid });
+    const inLibrary = references.some(r => paperIdOf(r) === pid);
+    const noteId = inLibrary
+      ? ensurePaperNote({ paperId: pid, title: ref.title, citationKey: ref.citationKey })
+      : importReference(ref);
+    setActivePdf({ url: ref.pdfUrl, title: ref.title, citationKey: ref.citationKey, paperId: pid, noteId });
     setReferences(rs => rs.map(r => (paperIdOf(r) === pid
       ? { ...r, status: r.status === 'done' ? 'done' : 'reading', lastOpenedAt: Date.now() }
       : r)));
+    setOpenTabs(t => (t.includes(noteId) ? t : [...t, noteId]));
+    setActiveFile(noteId);
     setSidebarOpen(false);
     setResearchOpen(false);
     setAiOpen(false);
@@ -177,12 +201,12 @@ export default function App() {
 
   const openLocalPdf = async (file) => {
     const bytes = new Uint8Array(await file.arrayBuffer());
-    setActivePdf({
-      localData: bytes,
-      title: file.name.replace(/\.pdf$/i, ''),
-      citationKey: null,
-      paperId: 'local:' + file.name,
-    });
+    const title = file.name.replace(/\.pdf$/i, '');
+    const pid = 'local:' + file.name;
+    const noteId = ensurePaperNote({ paperId: pid, title });
+    setActivePdf({ localData: bytes, title, citationKey: null, paperId: pid, noteId });
+    setOpenTabs(t => (t.includes(noteId) ? t : [...t, noteId]));
+    setActiveFile(noteId);
     setSidebarOpen(false);
     setResearchOpen(false);
     setView('editor');
@@ -198,9 +222,11 @@ export default function App() {
     const pid = paper.paperId;
     const ref = references.find(r => paperIdOf(r) === pid);
     if (ref?.noteId && files.some(f => f.id === ref.noteId)) return ref.noteId;
+    if (paperNotes[pid] && files.some(f => f.id === paperNotes[pid])) return paperNotes[pid];
     const legacy = ref && files.find(f => f.id.startsWith('ref-' + ref.citationKey + '-'));
     if (legacy) {
       setReferences(rs => rs.map(r => (paperIdOf(r) === pid ? { ...r, noteId: legacy.id } : r)));
+      setPaperNotes(m => ({ ...m, [pid]: legacy.id }));
       return legacy.id;
     }
     const noteId = 'n' + Date.now();
@@ -208,6 +234,7 @@ export default function App() {
     setFiles(fs => [...fs, { id: noteId, name, top: true, mtime: Date.now() }]);
     setDocs(d => ({ ...d, [noteId]: `# ${paper.title || 'Paper notes'}\n\n## Highlights\n` }));
     if (ref) setReferences(rs => rs.map(r => (paperIdOf(r) === pid ? { ...r, noteId } : r)));
+    setPaperNotes(m => ({ ...m, [pid]: noteId }));
     return noteId;
   };
 
@@ -242,6 +269,10 @@ export default function App() {
       const [pid] = found;
       setView('editor');
       if (activePdf?.paperId === pid) {
+        if (activePdf.noteId) {
+          setOpenTabs(t => (t.includes(activePdf.noteId) ? t : [...t, activePdf.noteId]));
+          setActiveFile(activePdf.noteId);
+        }
         if (workspaceLayout === 'editor') setWorkspaceLayout('split');
         setJumpHl(id);
         return;
@@ -251,7 +282,10 @@ export default function App() {
         alert('This highlight lives in a local PDF — open that file in the reader first, then the link will jump to it.');
         return;
       }
-      setActivePdf({ url: ref.pdfUrl, title: ref.title, citationKey: ref.citationKey, paperId: pid });
+      const noteId = ensurePaperNote({ paperId: pid, title: ref.title, citationKey: ref.citationKey });
+      setActivePdf({ url: ref.pdfUrl, title: ref.title, citationKey: ref.citationKey, paperId: pid, noteId });
+      setOpenTabs(t => (t.includes(noteId) ? t : [...t, noteId]));
+      setActiveFile(noteId);
       setSidebarOpen(false);
       setResearchOpen(false);
       setWorkspaceLayout('split');
@@ -259,7 +293,10 @@ export default function App() {
     };
     window.addEventListener('inkwell:jump-hl', onJump);
     return () => window.removeEventListener('inkwell:jump-hl', onJump);
-  }, [highlights, references, activePdf, workspaceLayout]);
+  }, [highlights, references, activePdf, workspaceLayout, files, paperNotes]);
+
+  // the reader is bound to its paper's note — any other note gets the full width
+  const pdfHere = Boolean(activePdf && activeFile === activePdf.noteId);
 
   // debounced persistence — sketch drags update state at pointer-move rate
   useEffect(() => {
@@ -574,7 +611,7 @@ export default function App() {
             </div>
           )}
 
-          {view === 'editor' && activePdf && workspaceLayout === 'editor' && (
+          {view === 'editor' && pdfHere && workspaceLayout === 'editor' && (
             <button
               className="workspace-return-split"
               type="button"
@@ -594,12 +631,12 @@ export default function App() {
           )}
 
           <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
-            {view === 'editor' && !activePdf && editorPanel}
-            {view === 'editor' && activePdf && workspaceLayout === 'split' && (
+            {view === 'editor' && !pdfHere && editorPanel}
+            {view === 'editor' && pdfHere && workspaceLayout === 'split' && (
               <WorkspaceSplit left={pdfPanel} right={editorPanel} initialRatio={workspaceRatio} onRatioChange={setWorkspaceRatio} />
             )}
-            {view === 'editor' && activePdf && workspaceLayout === 'pdf' && <div className="workspace-single-panel">{pdfPanel}</div>}
-            {view === 'editor' && activePdf && workspaceLayout === 'editor' && editorPanel}
+            {view === 'editor' && pdfHere && workspaceLayout === 'pdf' && <div className="workspace-single-panel">{pdfPanel}</div>}
+            {view === 'editor' && pdfHere && workspaceLayout === 'editor' && editorPanel}
             {view === 'graph' && <GraphView files={files} docs={docs} onOpen={openFile} />}
             {view === 'slides' && (
               <SlidesView

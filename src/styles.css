@@ -390,6 +390,7 @@ textarea::placeholder { color: #4a4f5c; }
   overflow: hidden;
 }
 .workspace-pane { flex-grow: 0; flex-shrink: 1; }
+.workspace-editor-panel { flex: 1; }
 .workspace-pane > *,
 .workspace-editor-panel > *,
 .workspace-single-panel > * { flex: 1; min-width: 0; }
