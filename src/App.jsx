@@ -4,6 +4,7 @@ import {
 } from './data.js';
 import { askAssistant, buildVaultContext } from './assistant.js';
 import { parseBlocks, stripInline, extractWikiNames } from './markdown.jsx';
+import { loadHighlightStore, findHighlight, paperIdOf } from './highlights.js';
 import IconRail from './components/IconRail.jsx';
 import Sidebar from './components/Sidebar.jsx';
 import TabBar from './components/TabBar.jsx';
@@ -90,7 +91,9 @@ export default function App() {
   const [aiProvider, setAiProvider] = useState(null); // set after the first real reply
 
   const [researchOpen, setResearchOpen] = useState(false);
-  const [activePdf, setActivePdf] = useState(null);
+  const [activePdf, setActivePdf] = useState(null); // { url?, localData?, title, citationKey, paperId }
+  const [highlights, setHighlights] = useState(loadHighlightStore);
+  const [jumpHl, setJumpHl] = useState(null);
   const [focusMode, setFocusMode] = useState(false);
   const [workspaceLayout, setWorkspaceLayout] = useState('split'); // 'split' | 'pdf' | 'editor'
   const [workspaceRatio, setWorkspaceRatio] = useState(() => {
@@ -111,13 +114,25 @@ export default function App() {
   }, [references]);
 
   useEffect(() => {
+    localStorage.setItem('inkwell:highlights', JSON.stringify(highlights));
+  }, [highlights]);
+
+  useEffect(() => {
     localStorage.setItem('inkwell:workspace-ratio', String(workspaceRatio));
   }, [workspaceRatio]);
 
+  /** Save a paper to the library (reading queue) and give it a literature note. */
   const importReference = (ref) => {
-    const keyExists = references.some(r => r.citationKey === ref.citationKey);
-    if (!keyExists) {
-      setReferences(prev => [...prev, ref]);
+    const pid = paperIdOf(ref);
+    const existing = references.find(r => paperIdOf(r) === pid);
+    if (existing) {
+      // already in the library — just surface its note
+      if (existing.noteId && files.some(f => f.id === existing.noteId)) {
+        setOpenTabs(t => (t.includes(existing.noteId) ? t : [...t, existing.noteId]));
+        setActiveFile(existing.noteId);
+        setView('editor');
+      }
+      return;
     }
     const noteId = 'ref-' + ref.citationKey + '-' + Date.now();
     const noteName = `Lit - ${ref.title.slice(0, 40)}`;
@@ -133,16 +148,118 @@ export default function App() {
       `${ref.abstract || 'No abstract available.'}`,
       `\n## BibTeX`,
       `\`\`\`bibtex\n${ref.bibtex}\n\`\`\``,
-      `\n## Notes`,
-      `- `,
+      `\n## Highlights`,
+      ``,
     ].join('\n');
 
+    setReferences(prev => [...prev, { ...ref, noteId, status: 'toread', addedAt: Date.now() }]);
     setFiles(fs => [...fs, { id: noteId, name: noteName, top: true, mtime: Date.now() }]);
     setDocs(docsMap => ({ ...docsMap, [noteId]: docContent }));
     setOpenTabs(t => [...t, noteId]);
     setActiveFile(noteId);
     setView('editor');
   };
+
+  /** Open a library paper in the reader; queue status moves to "reading". */
+  const openPaper = (ref) => {
+    if (!ref.pdfUrl) return;
+    const pid = paperIdOf(ref);
+    setActivePdf({ url: ref.pdfUrl, title: ref.title, citationKey: ref.citationKey, paperId: pid });
+    setReferences(rs => rs.map(r => (paperIdOf(r) === pid
+      ? { ...r, status: r.status === 'done' ? 'done' : 'reading', lastOpenedAt: Date.now() }
+      : r)));
+    setSidebarOpen(false);
+    setResearchOpen(false);
+    setAiOpen(false);
+    setView('editor');
+    setWorkspaceLayout('split');
+  };
+
+  const openLocalPdf = async (file) => {
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    setActivePdf({
+      localData: bytes,
+      title: file.name.replace(/\.pdf$/i, ''),
+      citationKey: null,
+      paperId: 'local:' + file.name,
+    });
+    setSidebarOpen(false);
+    setResearchOpen(false);
+    setView('editor');
+    setWorkspaceLayout('split');
+  };
+
+  const setPaperStatus = (pid, status) => {
+    setReferences(rs => rs.map(r => (paperIdOf(r) === pid ? { ...r, status } : r)));
+  };
+
+  /** Find (or create) the literature note for a paper; returns its id. */
+  const ensurePaperNote = (paper) => {
+    const pid = paper.paperId;
+    const ref = references.find(r => paperIdOf(r) === pid);
+    if (ref?.noteId && files.some(f => f.id === ref.noteId)) return ref.noteId;
+    const legacy = ref && files.find(f => f.id.startsWith('ref-' + ref.citationKey + '-'));
+    if (legacy) {
+      setReferences(rs => rs.map(r => (paperIdOf(r) === pid ? { ...r, noteId: legacy.id } : r)));
+      return legacy.id;
+    }
+    const noteId = 'n' + Date.now();
+    const name = `Lit - ${(paper.title || 'Paper').slice(0, 40)}`;
+    setFiles(fs => [...fs, { id: noteId, name, top: true, mtime: Date.now() }]);
+    setDocs(d => ({ ...d, [noteId]: `# ${paper.title || 'Paper notes'}\n\n## Highlights\n` }));
+    if (ref) setReferences(rs => rs.map(r => (paperIdOf(r) === pid ? { ...r, noteId } : r)));
+    return noteId;
+  };
+
+  /** A fresh highlight lands in the store AND as a quote block in the paper's note. */
+  const addHighlight = (hl) => {
+    if (!activePdf) return;
+    const pid = activePdf.paperId;
+    setHighlights(s => ({ ...s, [pid]: [...(s[pid] || []), hl] }));
+    const noteId = ensurePaperNote(activePdf);
+    const quoteText = hl.text.length > 420 ? hl.text.slice(0, 417) + '…' : hl.text;
+    const label = activePdf.citationKey ? `@${activePdf.citationKey}, p. ${hl.page}` : `p. ${hl.page}`;
+    const block = `\n> "${quoteText}"\n> — [${label}](hl://${hl.id})\n`;
+    setDocs(d => ({ ...d, [noteId]: (d[noteId] ?? '').replace(/\n*$/, '\n') + block }));
+    setFiles(f => f.map(x => (x.id === noteId ? { ...x, mtime: Date.now() } : x)));
+    setOpenTabs(t => (t.includes(noteId) ? t : [...t, noteId]));
+    setActiveFile(noteId);
+    if (workspaceLayout === 'pdf') setWorkspaceLayout('split');
+  };
+
+  const removeHighlight = (id) => {
+    if (!activePdf) return;
+    const pid = activePdf.paperId;
+    setHighlights(s => ({ ...s, [pid]: (s[pid] || []).filter(h => h.id !== id) }));
+  };
+
+  // clicking a hl:// backlink in any note jumps back to the exact spot in the paper
+  useEffect(() => {
+    const onJump = (e) => {
+      const id = e.detail?.id;
+      const found = findHighlight(highlights, id);
+      if (!found) return;
+      const [pid] = found;
+      setView('editor');
+      if (activePdf?.paperId === pid) {
+        if (workspaceLayout === 'editor') setWorkspaceLayout('split');
+        setJumpHl(id);
+        return;
+      }
+      const ref = references.find(r => paperIdOf(r) === pid);
+      if (!ref?.pdfUrl) {
+        alert('This highlight lives in a local PDF — open that file in the reader first, then the link will jump to it.');
+        return;
+      }
+      setActivePdf({ url: ref.pdfUrl, title: ref.title, citationKey: ref.citationKey, paperId: pid });
+      setSidebarOpen(false);
+      setResearchOpen(false);
+      setWorkspaceLayout('split');
+      setJumpHl(id);
+    };
+    window.addEventListener('inkwell:jump-hl', onJump);
+    return () => window.removeEventListener('inkwell:jump-hl', onJump);
+  }, [highlights, references, activePdf, workspaceLayout]);
 
   // debounced persistence — sketch drags update state at pointer-move rate
   useEffect(() => {
@@ -359,15 +476,22 @@ export default function App() {
   const pdfPanel = activePdf && (
     <PdfViewer
       pdfUrl={activePdf.url}
+      localData={activePdf.localData}
       title={activePdf.title}
       citationKey={activePdf.citationKey}
+      highlights={highlights[activePdf.paperId] || []}
+      onAddHighlight={addHighlight}
+      onRemoveHighlight={removeHighlight}
+      jumpHl={jumpHl}
+      onJumpDone={() => setJumpHl(null)}
       layout={workspaceLayout}
       onLayoutChange={setWorkspaceLayout}
       onSendToAi={(text) => {
         setAiOpen(true);
         sendMessage(text);
       }}
-      onClose={() => setActivePdf(null)}
+      onClose={() => { setActivePdf(null); setJumpHl(null); }}
+      onLocalFile={openLocalPdf}
     />
   );
 
@@ -410,14 +534,17 @@ export default function App() {
         {!focusMode && researchOpen && (
           <ResearchPanel
             references={references}
+            highlights={highlights}
             onImportReference={importReference}
-            onOpenPdf={(url, title, citationKey) => {
-              setActivePdf({ url, title, citationKey });
-              setSidebarOpen(false);
-              setResearchOpen(false);
-              setAiOpen(false);
-              setWorkspaceLayout('split');
+            onOpenPaper={openPaper}
+            onSetStatus={setPaperStatus}
+            onOpenNote={(ref) => {
+              const noteId = ensurePaperNote({ paperId: paperIdOf(ref), title: ref.title, citationKey: ref.citationKey });
+              setOpenTabs(t => (t.includes(noteId) ? t : [...t, noteId]));
+              setActiveFile(noteId);
+              setView('editor');
             }}
+            onLocalPdf={openLocalPdf}
             onClose={() => setResearchOpen(false)}
           />
         )}
@@ -492,6 +619,7 @@ export default function App() {
           <AIPanel
             messages={aiMessages} typing={aiTyping} input={aiInput}
             onInput={setAiInput} onSend={sendMessage} onWiki={openWiki} provider={aiProvider} localAi={settings.localAi}
+            onClose={() => setAiOpen(false)}
           />
         )}
       </div>

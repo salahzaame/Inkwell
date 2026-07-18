@@ -3,13 +3,13 @@ import { KBD } from '../data.js';
 const btn = (on) => ({
   width: '30px', height: '30px', borderRadius: '8px', display: 'flex', alignItems: 'center',
   justifyContent: 'center', cursor: 'pointer',
-  color: on ? 'var(--acc)' : '#8b90a0',
+  color: on ? 'var(--acc)' : 'var(--ink-2)',
   background: on ? 'color-mix(in oklab, var(--acc) 14%, transparent)' : 'transparent',
 });
 
 export default function IconRail({ rail, onFiles, onSearch, onGraph, onSlides, onResearch, onAI, onSettings, onFocusMode }) {
   return (
-    <div style={{ width: '46px', background: '#141518', borderRight: '1px solid #23252b', display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '10px 0', gap: '4px', flexShrink: 0 }}>
+    <div style={{ width: '46px', background: 'var(--bg-deep)', borderRight: '1px solid var(--line)', display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '10px 0', gap: '4px', flexShrink: 0 }}>
       <div style={{ width: '30px', height: '30px', marginBottom: '8px', borderRadius: '8px', background: 'color-mix(in oklab, var(--acc) 16%, transparent)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
         <svg width="17" height="17" viewBox="0 0 24 24" fill="none" style={{ stroke: 'var(--acc)', strokeWidth: 1.9, strokeLinecap: 'round', strokeLinejoin: 'round' }}><path d="M3 21l3.5-1L20 6.5a2.12 2.12 0 0 0-3-3L3.5 17z" /><path d="M14 5.5l4.5 4.5" /></svg>
       </div>

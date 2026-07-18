@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
+import { paperIdOf } from '../highlights.js';
 
 function reconstructAbstract(invertedIndex) {
   if (!invertedIndex) return '';
@@ -20,12 +21,89 @@ function generateCitationKey(authors, year) {
   return `${lastName}${year || 'nd'}`;
 }
 
-export default function ResearchPanel({ references, onImportReference, onOpenPdf, onClose }) {
-  const [tab, setTab] = useState('search'); // 'search' | 'references'
+const STATUSES = [
+  { id: 'toread', label: 'To read' },
+  { id: 'reading', label: 'Reading' },
+  { id: 'done', label: 'Done' },
+];
+
+function authorsLine(ref) {
+  const a = ref.authors || [];
+  return `${a.slice(0, 3).join(', ')}${a.length > 3 ? ' et al.' : ''}${ref.year ? ' · ' + ref.year : ''}`;
+}
+
+function QueueCard({ refItem, hlCount, isContinue, onOpenPaper, onSetStatus, onOpenNote, onCopyKey }) {
+  const pid = paperIdOf(refItem);
+  const status = refItem.status || 'toread';
+  return (
+    <div className={'queue-card' + (isContinue ? ' queue-continue' : '')}>
+      {isContinue && (
+        <div style={{ fontFamily: "'Gochi Hand', cursive", fontSize: '13px', color: 'var(--acc)' }}>
+          pick up where you left off
+        </div>
+      )}
+      <div
+        className="q-title"
+        onClick={() => (refItem.pdfUrl ? onOpenPaper(refItem) : onOpenNote(refItem))}
+        title={refItem.pdfUrl ? 'Open the paper' : 'Open the note (no open-access PDF found)'}
+      >
+        {refItem.title}
+      </div>
+      <div className="q-meta">{authorsLine(refItem)}</div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+        <div className="seg" role="group" aria-label="Reading status">
+          {STATUSES.map(s => (
+            <button
+              key={s.id}
+              className={status === s.id ? 'on' : ''}
+              onClick={() => onSetStatus(pid, s.id)}
+            >{s.label}</button>
+          ))}
+        </div>
+        <span style={{ flex: 1 }} />
+        {hlCount > 0 && (
+          <span title={`${hlCount} highlight${hlCount === 1 ? '' : 's'}`} style={{ fontSize: '11px', color: 'var(--ink-3)', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+            <span style={{ width: '8px', height: '8px', borderRadius: '2px', background: 'var(--marker-amber)', display: 'inline-block', opacity: .8 }} />
+            {hlCount}
+          </span>
+        )}
+        <button className="hv-item" onClick={() => onOpenNote(refItem)} title="Open literature note"
+          style={{ border: 'none', background: 'transparent', color: 'var(--ink-3)', cursor: 'pointer', padding: '4px', borderRadius: '5px', display: 'inline-flex' }}>
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M6 3h9l4 4v14H6z" /><path d="M14 3v5h5" /></svg>
+        </button>
+        {refItem.citationKey && (
+          <button className="hv-item" onClick={() => onCopyKey(refItem)} title={`Copy [@${refItem.citationKey}]`}
+            style={{ border: 'none', background: 'transparent', color: 'var(--ink-3)', cursor: 'pointer', padding: '4px 6px', borderRadius: '5px', fontSize: '11.5px', fontWeight: 700 }}>
+            @
+          </button>
+        )}
+        {refItem.pdfUrl && (
+          <button
+            onClick={() => onOpenPaper(refItem)}
+            style={{ border: 'none', background: 'color-mix(in oklab, var(--acc) 15%, transparent)', color: 'var(--acc)', cursor: 'pointer', padding: '4px 10px', borderRadius: '6px', fontSize: '11.5px', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '5px' }}
+          >
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2zM22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z" /></svg>
+            Read
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+export default function ResearchPanel({
+  references, highlights = {},
+  onImportReference, onOpenPaper, onSetStatus, onOpenNote, onLocalPdf, onClose,
+}) {
+  const [tab, setTab] = useState(references.length > 0 ? 'queue' : 'search');
   const [query, setQuery] = useState('');
   const [loading, setLoading] = useState(false);
   const [results, setResults] = useState([]);
   const [expandedIndex, setExpandedIndex] = useState(null);
+  const fileRef = useRef(null);
+
+  const hlCount = (ref) => (highlights[paperIdOf(ref)] || []).length;
+  const inLibrary = (work) => references.some(r => paperIdOf(r) === paperIdOf(work));
 
   const handleSearch = async (e) => {
     if (e) e.preventDefault();
@@ -37,7 +115,7 @@ export default function ResearchPanel({ references, onImportReference, onOpenPdf
       const res = await fetch(`https://api.openalex.org/works?search=${encodeURIComponent(q)}&per_page=12`);
       if (!res.ok) throw new Error('Search failed');
       const data = await res.json();
-      
+
       const works = (data.results || []).map(w => {
         const title = w.title || 'Untitled Paper';
         const year = w.publication_year || null;
@@ -49,7 +127,6 @@ export default function ResearchPanel({ references, onImportReference, onOpenPdf
         const citedBy = w.cited_by_count || 0;
         const citationKey = generateCitationKey(authors, year);
 
-        // Generate BibTeX snippet
         const authorList = authors.length > 0 ? authors.join(' and ') : 'Unknown Authors';
         const journal = w.primary_location?.source?.display_name || '';
         const bibtex = `@article{${citationKey},
@@ -72,140 +149,102 @@ export default function ResearchPanel({ references, onImportReference, onOpenPdf
     }
   };
 
-  const copyToClipboard = (text, message = 'Copied!') => {
-    navigator.clipboard.writeText(text);
-    alert(message);
-  };
+  const copyKey = (ref) => navigator.clipboard.writeText(`[@${ref.citationKey}]`);
 
-  const cardStyle = {
-    background: '#1e2025',
-    border: '1px solid #2c2f37',
-    borderRadius: '10px',
-    padding: '12px',
-    marginBottom: '10px',
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '6px',
-    animation: 'fadeUp .2s ease-out'
-  };
+  /* queue grouping: reading first (most recent on top), then to-read, then done */
+  const withStatus = references.map(r => ({ ...r, status: r.status || 'toread' }));
+  const reading = withStatus.filter(r => r.status === 'reading').sort((a, b) => (b.lastOpenedAt || 0) - (a.lastOpenedAt || 0));
+  const toread = withStatus.filter(r => r.status === 'toread').sort((a, b) => (b.addedAt || 0) - (a.addedAt || 0));
+  const done = withStatus.filter(r => r.status === 'done').sort((a, b) => (b.lastOpenedAt || 0) - (a.lastOpenedAt || 0));
 
-  const btnStyle = {
-    padding: '6px 12px',
-    borderRadius: '6px',
-    border: 'none',
-    fontSize: '11.5px',
-    cursor: 'pointer',
-    fontWeight: 500,
-    display: 'inline-flex',
-    alignItems: 'center',
-    gap: '4px',
-    background: '#22242b',
-    color: '#dadde5',
-    transition: 'background .15s'
+  const smallBtn = {
+    padding: '5px 11px', borderRadius: '6px', border: 'none', fontSize: '11.5px', cursor: 'pointer',
+    fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '5px',
+    background: 'var(--bg-raise)', color: 'var(--ink-1)', transition: 'background .15s',
   };
 
   return (
-    <div style={{ width: '350px', background: '#191b1f', borderRight: '1px solid #23252b', display: 'flex', flexDirection: 'column', flexShrink: 0 }}>
-      {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 14px', borderBottom: '1px solid #23252b' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--acc)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20M4 19.5A2.5 2.5 0 0 0 6.5 22H20M4 19.5v-15A2.5 2.5 0 0 1 6.5 2M20 4v18" /><path d="M6 6h10M6 10h10" /></svg>
-          <span style={{ fontSize: '13px', fontWeight: 600 }}>Research Library</span>
-        </div>
-        <div className="hv-item" onClick={onClose} style={{ width: '22px', height: '22px', borderRadius: '6px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#8b90a0', cursor: 'pointer' }}>
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M18 6L6 18M6 6l12 12" /></svg>
-        </div>
-      </div>
-
-      {/* Tabs */}
-      <div style={{ display: 'flex', borderBottom: '1px solid #23252b', padding: '4px 8px', gap: '4px' }}>
-        <div 
-          onClick={() => setTab('search')}
-          style={{
-            flex: 1, textAlign: 'center', fontSize: '12px', padding: '6px 0', cursor: 'pointer', borderRadius: '6px',
-            color: tab === 'search' ? 'var(--acc)' : '#8b90a0',
-            background: tab === 'search' ? 'color-mix(in oklab, var(--acc) 12%, transparent)' : 'transparent',
-            fontWeight: tab === 'search' ? 600 : 400
-          }}
-        >
-          Search Papers
-        </div>
-        <div 
-          onClick={() => setTab('references')}
-          style={{
-            flex: 1, textAlign: 'center', fontSize: '12px', padding: '6px 0', cursor: 'pointer', borderRadius: '6px',
-            color: tab === 'references' ? 'var(--acc)' : '#8b90a0',
-            background: tab === 'references' ? 'color-mix(in oklab, var(--acc) 12%, transparent)' : 'transparent',
-            fontWeight: tab === 'references' ? 600 : 400
-          }}
-        >
-          Reference Vault ({references.length})
+    <div className="side-panel" style={{ width: '330px', borderRight: '1px solid var(--line)' }}>
+      <div className="panel-header">
+        <span className="panel-title">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--acc)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20M4 19.5A2.5 2.5 0 0 0 6.5 22H20M4 19.5v-15A2.5 2.5 0 0 1 6.5 2M20 4v18" /><path d="M6 6h10M6 10h10" /></svg>
+          Research
+        </span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+          <div className="seg" role="tablist" aria-label="Research panel tabs">
+            <button role="tab" aria-selected={tab === 'queue'} className={tab === 'queue' ? 'on' : ''} onClick={() => setTab('queue')}>
+              Queue{references.length > 0 ? ` · ${references.length}` : ''}
+            </button>
+            <button role="tab" aria-selected={tab === 'search'} className={tab === 'search' ? 'on' : ''} onClick={() => setTab('search')}>
+              Search
+            </button>
+          </div>
+          <div className="hv-item panel-close" onClick={onClose} title="Close panel">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M18 6L6 18M6 6l12 12" /></svg>
+          </div>
         </div>
       </div>
 
-      {/* Search Tab View */}
+      {/* ── Search tab ── */}
       {tab === 'search' && (
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
           <form onSubmit={handleSearch} style={{ padding: '12px 14px 8px', display: 'flex', gap: '8px' }}>
-            <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: '8px', background: '#1e2025', border: '1px solid #2c2f37', borderRadius: '8px', padding: '6px 10px' }}>
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#8b90a0" strokeWidth="2.5"><circle cx="11" cy="11" r="7" /><path d="M16.5 16.5L21 21" /></svg>
+            <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: '8px', background: 'var(--bg-canvas)', border: '1px solid var(--line-2)', borderRadius: '8px', padding: '6px 10px' }}>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--ink-3)" strokeWidth="2.5"><circle cx="11" cy="11" r="7" /><path d="M16.5 16.5L21 21" /></svg>
               <input
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                placeholder="Search arXiv, DOIs, fields..."
-                style={{ flex: 1, background: 'transparent', border: 'none', outline: 'none', color: '#dadde5', fontSize: '12.5px', minWidth: 0 }}
+                placeholder="Search 250M papers on OpenAlex…"
+                style={{ flex: 1, background: 'transparent', border: 'none', outline: 'none', color: 'var(--ink-1)', fontSize: '12.5px', minWidth: 0 }}
               />
             </div>
-            <button className="hv-bright" type="submit" style={{ ...btnStyle, background: 'var(--acc)', color: '#17181c', border: 'none', padding: '6px 12px' }}>
+            <button className="hv-bright" type="submit" style={{ ...smallBtn, background: 'var(--acc)', color: '#17181c' }}>
               Search
             </button>
           </form>
 
-          {/* Results List */}
-          <div style={{ flex: 1, overflowY: 'auto', padding: '8px 14px 14px' }}>
+          <div style={{ flex: 1, overflowY: 'auto', padding: '8px 14px 14px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
             {loading ? (
-              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '40px 0', gap: '10px', color: '#8b90a0' }}>
-                <span style={{ fontSize: '13px' }}>Searching OpenAlex database...</span>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '40px 0', gap: '8px', color: 'var(--ink-2)', fontSize: '12.5px' }}>
+                <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: 'var(--acc)', animation: 'blinkDot 1.2s infinite' }} />
+                Searching OpenAlex…
               </div>
             ) : results.length === 0 ? (
-              <div style={{ textAlign: 'center', padding: '40px 0', color: '#5b6170', fontSize: '12.5px' }}>
-                Type a topic or author to begin searching.
+              <div style={{ textAlign: 'center', padding: '40px 12px', color: 'var(--ink-3)', fontSize: '12.5px', lineHeight: 1.6 }}>
+                Search a topic, an author, or a paper title.<br />Anything you save lands in your reading queue.
               </div>
             ) : (
               results.map((work, idx) => (
-                <div key={work.id || idx} style={cardStyle}>
-                  <div style={{ fontSize: '13px', fontWeight: 600, color: '#e7e9ef', lineHeight: 1.4 }}>
-                    {work.title}
+                <div key={work.id || idx} className="queue-card" style={{ animation: 'fadeUp .2s ease-out' }}>
+                  <div className="q-title" style={{ cursor: 'default' }}>{work.title}</div>
+                  <div className="q-meta">
+                    {authorsLine(work)}{work.citedBy > 0 ? ` · cited ${work.citedBy}×` : ''}
                   </div>
-                  <div style={{ fontSize: '11px', color: '#8b90a0' }}>
-                    {work.authors.slice(0, 3).join(', ')}{work.authors.length > 3 ? ' et al.' : ''} · {work.year}
-                  </div>
-                  {work.citedBy > 0 && (
-                    <div style={{ fontSize: '10px', color: 'var(--acc)' }}>
-                      Cited by {work.citedBy} papers
-                    </div>
-                  )}
 
                   {expandedIndex === idx && work.abstract && (
-                    <div style={{ fontSize: '11.5px', color: '#b0b5c1', background: '#16181d', padding: '8px 10px', borderRadius: '6px', marginTop: '4px', lineHeight: 1.4, maxHeight: '120px', overflowY: 'auto' }}>
-                      <strong>Abstract:</strong> {work.abstract}
+                    <div style={{ fontSize: '11.5px', color: 'var(--ink-2)', background: 'var(--bg-deep)', padding: '8px 10px', borderRadius: '6px', lineHeight: 1.5, maxHeight: '130px', overflowY: 'auto' }}>
+                      {work.abstract}
                     </div>
                   )}
 
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginTop: '6px' }}>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginTop: '2px' }}>
                     {work.abstract && (
-                      <button className="hv-btn" type="button" onClick={() => setExpandedIndex(expandedIndex === idx ? null : idx)} style={btnStyle}>
-                        {expandedIndex === idx ? 'Hide Abstract' : 'Show Abstract'}
+                      <button className="hv-btn" type="button" onClick={() => setExpandedIndex(expandedIndex === idx ? null : idx)} style={{ ...smallBtn, fontWeight: 500 }}>
+                        {expandedIndex === idx ? 'Hide abstract' : 'Abstract'}
                       </button>
                     )}
-                    <button className="hv-btn" type="button" onClick={() => onImportReference(work)} style={{ ...btnStyle, background: 'color-mix(in oklab, var(--acc) 14%, transparent)', color: 'var(--acc)' }}>
-                      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M12 5v14M5 12h14" /></svg>
-                      Import Note
+                    <button
+                      className="hv-btn" type="button"
+                      disabled={inLibrary(work)}
+                      onClick={() => onImportReference(work)}
+                      style={{ ...smallBtn, background: inLibrary(work) ? 'transparent' : 'color-mix(in oklab, var(--acc) 14%, transparent)', color: inLibrary(work) ? 'var(--ink-3)' : 'var(--acc)', cursor: inLibrary(work) ? 'default' : 'pointer' }}
+                    >
+                      {inLibrary(work) ? '✓ In queue' : '+ Save to queue'}
                     </button>
                     {work.pdfUrl && (
-                      <button className="hv-btn" type="button" onClick={() => onOpenPdf(work.pdfUrl, work.title, work.citationKey)} style={{ ...btnStyle, background: '#2c2f37' }}>
-                        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2zM22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z" /></svg>
-                        Read Paper
+                      <button className="hv-btn" type="button" onClick={() => { if (!inLibrary(work)) onImportReference(work); onOpenPaper(work); }} style={smallBtn}>
+                        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2zM22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z" /></svg>
+                        Read now
                       </button>
                     )}
                   </div>
@@ -216,48 +255,62 @@ export default function ResearchPanel({ references, onImportReference, onOpenPdf
         </div>
       )}
 
-      {/* References Tab View */}
-      {tab === 'references' && (
-        <div style={{ flex: 1, overflowY: 'auto', padding: '14px' }}>
-          {references.length === 0 ? (
-            <div style={{ textAlign: 'center', padding: '40px 0', color: '#5b6170', fontSize: '12.5px' }}>
-              No references imported yet. Import them from search results.
+      {/* ── Reading queue tab ── */}
+      {tab === 'queue' && (
+        <div style={{ flex: 1, overflowY: 'auto', padding: '4px 14px 16px' }}>
+          {withStatus.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '48px 16px', color: 'var(--ink-3)', fontSize: '12.5px', lineHeight: 1.7 }}>
+              Your reading queue is empty.<br />
+              Find a paper in <b>Search</b> and save it, and it will wait for you here.
             </div>
           ) : (
-            references.map((ref, idx) => (
-              <div key={ref.id || idx} style={cardStyle}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px' }}>
-                  <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--acc)', background: 'color-mix(in oklab, var(--acc) 12%, transparent)', padding: '2px 6px', borderRadius: '4px', alignSelf: 'flex-start' }}>
-                    @{ref.citationKey}
-                  </span>
-                  {ref.pdfUrl && (
-                    <span 
-                      onClick={() => onOpenPdf(ref.pdfUrl, ref.title, ref.citationKey)}
-                      title="Read PDF"
-                      style={{ cursor: 'pointer', color: '#8b90a0', display: 'flex', alignItems: 'center' }}
-                      className="hv-fade"
-                    >
-                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2zM22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z" /></svg>
-                    </span>
-                  )}
-                </div>
-                <div style={{ fontSize: '12.5px', color: '#e7e9ef', fontWeight: 550, marginTop: '4px', lineHeight: 1.3 }}>
-                  {ref.title}
-                </div>
-                <div style={{ fontSize: '10.5px', color: '#8b90a0' }}>
-                  {ref.authors?.slice(0, 3).join(', ')}{ref.authors?.length > 3 ? ' et al.' : ''} · {ref.year}
-                </div>
-                <div style={{ display: 'flex', gap: '6px', marginTop: '4px' }}>
-                  <button className="hv-btn" type="button" onClick={() => copyToClipboard(`[@${ref.citationKey}]`, 'Citation key copied!')} style={btnStyle}>
-                    Copy CiteKey
-                  </button>
-                  <button className="hv-btn" type="button" onClick={() => copyToClipboard(ref.bibtex, 'BibTeX copied to clipboard!')} style={btnStyle}>
-                    Copy BibTeX
-                  </button>
-                </div>
-              </div>
-            ))
+            <>
+              {reading.length > 0 && (
+                <>
+                  <div className="queue-section-label">reading now</div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                    {reading.map((r, i) => (
+                      <QueueCard key={paperIdOf(r)} refItem={r} hlCount={hlCount(r)} isContinue={i === 0}
+                        onOpenPaper={onOpenPaper} onSetStatus={onSetStatus} onOpenNote={onOpenNote} onCopyKey={copyKey} />
+                    ))}
+                  </div>
+                </>
+              )}
+              {toread.length > 0 && (
+                <>
+                  <div className="queue-section-label">up next</div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                    {toread.map(r => (
+                      <QueueCard key={paperIdOf(r)} refItem={r} hlCount={hlCount(r)}
+                        onOpenPaper={onOpenPaper} onSetStatus={onSetStatus} onOpenNote={onOpenNote} onCopyKey={copyKey} />
+                    ))}
+                  </div>
+                </>
+              )}
+              {done.length > 0 && (
+                <>
+                  <div className="queue-section-label">finished</div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                    {done.map(r => (
+                      <QueueCard key={paperIdOf(r)} refItem={r} hlCount={hlCount(r)}
+                        onOpenPaper={onOpenPaper} onSetStatus={onSetStatus} onOpenNote={onOpenNote} onCopyKey={copyKey} />
+                    ))}
+                  </div>
+                </>
+              )}
+            </>
           )}
+
+          <div style={{ marginTop: '18px', paddingTop: '12px', borderTop: '1px solid var(--line)', display: 'flex', justifyContent: 'center' }}>
+            <input
+              ref={fileRef} type="file" accept="application/pdf" style={{ display: 'none' }}
+              onChange={(e) => { const f = e.target.files?.[0]; if (f) onLocalPdf(f); e.target.value = ''; }}
+            />
+            <button className="hv-btn" onClick={() => fileRef.current?.click()} style={{ ...smallBtn, fontWeight: 500, color: 'var(--ink-2)' }}>
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /></svg>
+              Read a local PDF
+            </button>
+          </div>
         </div>
       )}
     </div>

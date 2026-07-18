@@ -102,7 +102,23 @@ export function Inline({ text, onWiki }) {
     else if (m[4]) out.push(<code key={k++} style={{ background: 'color-mix(in srgb, currentColor 9%, transparent)', border: '1px solid color-mix(in srgb, currentColor 12%, transparent)', borderRadius: '4px', padding: '1px 5px', fontSize: '.88em', fontFamily: 'ui-monospace, Consolas, monospace' }}>{s.slice(1, -1)}</code>);
     else if (m[5]) {
       const lm = s.match(/^\[([^\]]+)\]\(([^)]+)\)$/);
-      out.push(<a key={k++} href={lm[2]} target="_blank" rel="noreferrer" style={LINK_STYLE}>{lm[1]}</a>);
+      if (lm[2].startsWith('hl://')) {
+        // backlink to a PDF highlight — jump to it instead of navigating
+        const hlId = lm[2].slice(5);
+        out.push(
+          <a
+            key={k++} href="#" className="hl-link"
+            title="Jump to this highlight in the paper"
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              window.dispatchEvent(new CustomEvent('inkwell:jump-hl', { detail: { id: hlId } }));
+            }}
+          >{lm[1]}</a>,
+        );
+      } else {
+        out.push(<a key={k++} href={lm[2]} target="_blank" rel="noreferrer" style={LINK_STYLE}>{lm[1]}</a>);
+      }
     } else if (m[6]) out.push(<span key={k++} style={TAG_STYLE}>{s}</span>);
     last = m.index + s.length;
   }
