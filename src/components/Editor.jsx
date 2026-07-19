@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { fmtEdited } from '../data.js';
 import { parseBlocks, Inline, toggleTaskInDoc, extractTags, findMentions } from '../markdown.jsx';
+import { fileToCompressedDataUrl, newImageId } from '../images.js';
 import SketchCanvas from './SketchCanvas.jsx';
 
 /* ── palettes: warm "paper" page (Inkwell's signature) vs classic dark ── */
@@ -31,6 +32,7 @@ const SLASH_COMMANDS = [
   { id: 'code', label: 'Code block', glyph: '</>', snippet: '```\n\n```\n', caretOffset: 4 },
   { id: 'divider', label: 'Divider', glyph: '—', snippet: '---\n\n', commitBlock: true },
   { id: 'sketch', label: 'Sketch (Excalidraw)', glyph: '✎', sketch: true, commitBlock: true },
+  { id: 'image', label: 'Image (or just paste one)', glyph: '▣', image: true },
 ];
 
 /** Pixel position of the textarea caret, via the hidden-mirror technique. */
@@ -51,9 +53,39 @@ function caretPos(ta) {
 
 const linesOf = (doc) => (doc === '' ? [] : doc.split('\n'));
 
-function RenderedBlock({ b, pal, doc, onDocChange, onWiki }) {
+function RenderedBlock({ b, pal, doc, onDocChange, onWiki, images = {}, onDeleteImage }) {
   const pStyle = { fontSize: '15.5px', lineHeight: 1.75, color: pal.body, margin: '0 0 22px' };
   const toggleTask = (ix) => onDocChange(toggleTaskInDoc(doc, ix));
+
+  if (b.t === 'image') {
+    const src = b.src.startsWith('img:') ? images[b.src.slice(4)] : b.src;
+    return (
+      <figure className="note-figure" style={{ margin: '0 0 22px', position: 'relative' }}>
+        {src ? (
+          <img
+            src={src}
+            alt={b.alt || 'note image'}
+            style={{ maxWidth: '100%', display: 'block', borderRadius: '10px', border: `1px solid ${pal.border}`, boxShadow: '0 3px 14px rgba(0,0,0,.12)' }}
+          />
+        ) : (
+          <div style={{ border: `1px dashed ${pal.border}`, borderRadius: '10px', padding: '26px', textAlign: 'center', fontSize: '12.5px', color: pal.faint }}>
+            image missing from this vault
+          </div>
+        )}
+        {b.alt && <figcaption style={{ fontSize: '12.5px', color: pal.muted, marginTop: '7px', fontStyle: 'italic' }}>{b.alt}</figcaption>}
+        {onDeleteImage && (
+          <span
+            className="note-figure-del"
+            title="Remove image"
+            onMouseDown={(e) => e.stopPropagation()}
+            onClick={(e) => { e.stopPropagation(); onDeleteImage(b); }}
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M18 6L6 18M6 6l12 12" /></svg>
+          </span>
+        )}
+      </figure>
+    );
+  }
 
   if (b.t === 'h1') return <h2 style={{ fontSize: '27px', fontWeight: 700, margin: '0 0 12px', letterSpacing: '-.01em', fontFamily: pal.headFont, color: pal.ink }}><Inline text={b.text} onWiki={onWiki} /></h2>;
   if (b.t === 'h2') return <h2 style={{ fontSize: '22px', fontWeight: 600, margin: '0 0 12px', letterSpacing: '-.01em', fontFamily: pal.headFont, color: pal.ink }}><Inline text={b.text} onWiki={onWiki} /></h2>;
@@ -166,9 +198,12 @@ export default function Editor({
   note, crumb, doc, files, docs,
   onDocChange, onWiki, onOpen, onRename, onDelete, onInsertSketch, onCreateSketch, onNewNote,
   spell, grid, paper, accent, sketches, setSketchData,
+  images = {}, setImageData,
+  alignTop = false,
   references = [],
 }) {
   const taRef = useRef(null);
+  const imageInputRef = useRef(null);   // hidden file picker for image inserts
   const caretRef = useRef(null);        // caret to apply after (re)focus: number | 'end'
   const draftCaretRef = useRef(null);   // caret to apply after in-draft edits
   const pendingFocusRef = useRef(null); // { line, pos, virtual? } resolved after doc commits
@@ -368,6 +403,68 @@ export default function Editor({
     setSketchData(b.id, null);
   };
 
+  /** Remove an image block and purge its bytes from the vault. */
+  const deleteImageBlock = (b) => {
+    if (!window.confirm('Remove this image from the note?')) return;
+    if (focus) { setFocus(null); setSlash(null); }
+    const L = linesOf(doc);
+    onDocChange([...L.slice(0, b.line0), ...L.slice(b.line1)].join('\n'));
+    if (b.src.startsWith('img:') && setImageData) setImageData(b.src.slice(4), null);
+  };
+
+  /** Insert an image block after the block being edited, or at the end of the note. */
+  const insertImageLine = (id, alt = '') => {
+    const lineTxt = `![${alt}](img:${id})`;
+    let base = doc;
+    let at;
+    if (focus && !focus.virtual) {
+      base = replaceBlockLines(draft);
+      at = blocks[focus.idx].line0 + (draft === '' ? 0 : draft.split('\n').length);
+    } else if (focus && focus.virtual && draft.trim() !== '') {
+      const r = insertVirtualLines(draft);
+      base = r.newDoc;
+      at = r.line0 + draft.split('\n').length;
+    } else if (focus && focus.virtual) {
+      at = Math.min(focus.anchorLine, linesOf(doc).length);
+    } else {
+      at = linesOf(base).length;
+    }
+    const L = linesOf(base);
+    const newDoc = [...L.slice(0, at), '', lineTxt, ...L.slice(at)].join('\n').replace(/^\n+/, '');
+    setFocus(null);
+    setSlash(null);
+    onDocChange(newDoc);
+  };
+
+  const addImageFiles = async (fileList) => {
+    const imgs = [...(fileList || [])].filter(f => f.type.startsWith('image/'));
+    for (const f of imgs) {
+      try {
+        const dataUrl = await fileToCompressedDataUrl(f);
+        const id = newImageId();
+        setImageData(id, dataUrl);
+        insertImageLine(id);
+      } catch (err) {
+        alert(err.message || 'That image could not be added.');
+      }
+    }
+    return imgs.length > 0;
+  };
+
+  const onSheetPaste = (e) => {
+    if (!setImageData) return;
+    const file = [...(e.clipboardData?.items || [])].find(it => it.type.startsWith('image/'))?.getAsFile();
+    if (!file) return; // plain text pastes stay untouched
+    e.preventDefault();
+    addImageFiles([file]);
+  };
+
+  const onSheetDrop = (e) => {
+    if (!setImageData || !e.dataTransfer?.files?.length) return;
+    e.preventDefault();
+    addImageFiles(e.dataTransfer.files);
+  };
+
   const appendAtEnd = () => {
     const endLine = 1e9;
     if (focus) {
@@ -405,6 +502,14 @@ export default function Editor({
     const ta = taRef.current;
     if (!ta || !slash) return;
     const caret = ta.selectionStart;
+    if (cmd.image) {
+      // strip the "/image" text, commit, then hand off to the file picker
+      const newSrc = (draft.slice(0, slash.start) + draft.slice(caret)).replace(/\n+$/, '');
+      setSlash(null);
+      splitCommit(newSrc, '');
+      imageInputRef.current?.click();
+      return;
+    }
     const snippet = cmd.sketch ? '```sketch ' + onCreateSketch() + '\n```\n' : cmd.snippet;
     if (cmd.commitBlock) {
       // whole-block inserts (sketch, divider) commit instantly so they render
@@ -691,7 +796,7 @@ export default function Editor({
         }}
         style={{ cursor: 'text' }}
       >
-        <RenderedBlock b={b} pal={pal} doc={doc} onDocChange={onDocChange} onWiki={onWiki} />
+        <RenderedBlock b={b} pal={pal} doc={doc} onDocChange={onDocChange} onWiki={onWiki} images={images} onDeleteImage={deleteImageBlock} />
       </div>,
     );
   });
@@ -706,15 +811,25 @@ export default function Editor({
   const sheetVars = paper ? { '--acc': `color-mix(in oklab, ${accent} 62%, #3d2f05)` } : {};
 
   return (
-    <div style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}>
+    <div
+      style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}
+      onDragOver={(e) => { if (e.dataTransfer?.types?.includes('Files')) e.preventDefault(); }}
+      onDrop={onSheetDrop}
+    >
+      <input
+        ref={imageInputRef} type="file" accept="image/*" multiple style={{ display: 'none' }}
+        onChange={(e) => { addImageFiles(e.target.files); e.target.value = ''; }}
+      />
       <div
         key={note.id}
+        onPaste={onSheetPaste}
         style={paper ? {
-          maxWidth: '820px', margin: '26px auto 90px', padding: '42px 52px 26px',
+          // in split view the sheet's top edge lines up with the PDF page (44px toolbar + 26px gap)
+          maxWidth: '820px', margin: (alignTop ? '70px' : '26px') + ' auto 90px', padding: '42px 52px 26px',
           background: '#f6f2e7', borderRadius: '18px', position: 'relative', overflow: 'hidden',
           boxShadow: '0 30px 70px -32px rgba(0,0,0,.65), 0 2px 8px rgba(0,0,0,.35)',
           ...sheetVars,
-        } : { maxWidth: '700px', margin: '0 auto', padding: '36px 40px 26px' }}
+        } : { maxWidth: '700px', margin: (alignTop ? '70px' : '0') + ' auto 0', padding: alignTop ? '0 40px 26px' : '36px 40px 26px' }}
       >
         {paper && <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', opacity: 0.38, mixBlendMode: 'multiply', backgroundImage: NOISE }} />}
         <div style={{ position: 'relative' }}>
@@ -730,6 +845,9 @@ export default function Editor({
               </div>
               <div className={toolCls} title="Insert sketch block" onClick={onInsertSketch} style={iconBtn}>
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="14" rx="2" /><path d="M8 14l2.5-3 2 2.4L15.5 9l2.5 5" /></svg>
+              </div>
+              <div className={toolCls} title="Insert image — or paste a screenshot anywhere" onClick={() => imageInputRef.current?.click()} style={iconBtn}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="16" rx="2" /><circle cx="9" cy="10" r="1.6" /><path d="M4.5 19l5-5.5 3.5 3.7L16 14l3.5 5" /></svg>
               </div>
               <div
                 className={toolCls}

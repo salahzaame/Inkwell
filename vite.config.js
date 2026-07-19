@@ -58,14 +58,21 @@ function pdfProxy() {
           return;
         }
 
+        // same magic-byte check as the deployed api/pdf.js: bytes over headers
+        const file = Buffer.from(await response.arrayBuffer());
+        if (file.length < 5 || file.subarray(0, 5).toString('latin1') !== '%PDF-') {
+          res.statusCode = 415;
+          res.setHeader('Content-Type', 'application/json');
+          res.end(JSON.stringify({ error: 'The source sent a web page instead of the PDF.' }));
+          return;
+        }
+
         res.statusCode = 200;
-        res.setHeader('Content-Type', response.headers.get('Content-Type') || 'application/pdf');
+        res.setHeader('Content-Type', 'application/pdf');
         res.setHeader('Access-Control-Allow-Origin', '*');
         res.setHeader('Access-Control-Allow-Headers', '*');
         res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-
-        const arrayBuffer = await response.arrayBuffer();
-        res.end(Buffer.from(arrayBuffer));
+        res.end(file);
       })
       .catch(err => {
         res.statusCode = 502;

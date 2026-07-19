@@ -49,33 +49,78 @@ async function askOllama(messages) {
   return { text, provider: model.replace(/:latest$/, '') + ' · on-device', local: true };
 }
 
-async function askPollinations(messages) {
+async function askPollinations(messages, maxTokens) {
   // routed through the dev server's /api/llm proxy (see vite.config.js)
   const res = await fetch('/api/llm', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ model: 'openai', messages }),
+    body: JSON.stringify({ model: 'openai', messages, ...(maxTokens ? { max_tokens: maxTokens } : {}) }),
     signal: AbortSignal.timeout(60000),
   });
   if (!res.ok) throw new Error('pollinations HTTP ' + res.status);
   const j = await res.json();
   const text = (j.choices?.[0]?.message?.content || '').trim();
   if (!text) throw new Error('pollinations empty reply');
-  return { text, provider: 'pollinations · free cloud', local: false };
+  return { text, provider: 'pollinations · free cloud', local: false, finishReason: j.choices?.[0]?.finish_reason };
+}
+
+export const OPENROUTER_DEFAULT_MODEL = 'openai/gpt-oss-20b:free';
+
+async function askOpenRouter(messages, maxTokens, { key, model }) {
+  // OpenRouter allows browser calls with the user's own key (kept in settings)
+  const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      authorization: 'Bearer ' + key,
+      'HTTP-Referer': window.location.origin,
+      'X-Title': 'Inkwell',
+    },
+    body: JSON.stringify({ model: model || OPENROUTER_DEFAULT_MODEL, messages, ...(maxTokens ? { max_tokens: maxTokens } : {}) }),
+    signal: AbortSignal.timeout(90000),
+  });
+  if (!res.ok) throw new Error('openrouter HTTP ' + res.status);
+  const j = await res.json();
+  const text = (j.choices?.[0]?.message?.content || '').trim();
+  if (!text) throw new Error('openrouter empty reply');
+  const shortModel = (model || OPENROUTER_DEFAULT_MODEL).split('/').pop().replace(/:free$/, '');
+  return { text, provider: shortModel + ' · openrouter', local: false, finishReason: j.choices?.[0]?.finish_reason };
+}
+
+function providerChain({ preferLocal, settings, maxTokens }) {
+  const chain = [];
+  const or = settings?.openrouterKey
+    ? (messages) => askOpenRouter(messages, maxTokens, { key: settings.openrouterKey, model: settings.openrouterModel })
+    : null;
+  const poll = (messages) => askPollinations(messages, maxTokens);
+  const oll = (messages) => askOllama(messages);
+  if (preferLocal) chain.push(oll);
+  if (or) chain.push(or);
+  chain.push(poll);
+  if (!preferLocal) chain.push(oll);
+  return chain;
+}
+
+/** One-shot completion through the provider chain (OpenRouter → pollinations → ollama). */
+export async function completeChat({ messages, maxTokens, settings }) {
+  let lastErr;
+  for (const ask of providerChain({ preferLocal: false, settings, maxTokens })) {
+    try { return await ask(messages); } catch (e) { lastErr = e; }
+  }
+  throw lastErr ?? new Error('no model provider available');
 }
 
 /**
  * history: [{ role: 'u'|'a', text }] — most recent last.
  * Returns { text, provider, local }; throws only if every provider fails.
  */
-export async function askAssistant({ history, vault, preferLocal }) {
+export async function askAssistant({ history, vault, preferLocal, settings }) {
   const messages = [
     { role: 'system', content: systemPrompt(vault) },
     ...history.slice(-10).map(m => ({ role: m.role === 'u' ? 'user' : 'assistant', content: m.text })),
   ];
-  const chain = preferLocal ? [askOllama, askPollinations] : [askPollinations, askOllama];
   let lastErr;
-  for (const ask of chain) {
+  for (const ask of providerChain({ preferLocal, settings })) {
     try { return await ask(messages); } catch (e) { lastErr = e; }
   }
   throw lastErr ?? new Error('no assistant provider available');

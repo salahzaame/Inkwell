@@ -121,7 +121,15 @@ export default function ResearchPanel({
         const year = w.publication_year || null;
         const doi = w.doi || '';
         const url = w.primary_location?.landing_page_url || w.id || '';
-        const pdfUrl = w.primary_location?.pdf_url || '';
+        // every PDF source OpenAlex knows, open-access copies first — the reader
+        // walks this list so one blocked publisher doesn't kill the paper
+        const pdfCandidates = [];
+        const addPdf = (u) => { if (u && !pdfCandidates.includes(u)) pdfCandidates.push(u); };
+        addPdf(w.best_oa_location?.pdf_url);
+        addPdf(w.primary_location?.pdf_url);
+        for (const loc of w.locations || []) addPdf(loc?.pdf_url);
+        addPdf(w.open_access?.oa_url);
+        const pdfUrl = pdfCandidates[0] || '';
         const authors = (w.authorships || []).map(a => a.author?.display_name).filter(Boolean);
         const abstract = reconstructAbstract(w.abstract_inverted_index);
         const citedBy = w.cited_by_count || 0;
@@ -138,7 +146,7 @@ export default function ResearchPanel({
   doi={${doi}}
 }`;
 
-        return { id: w.id, title, year, doi, url, pdfUrl, authors, abstract, citedBy, citationKey, bibtex };
+        return { id: w.id, title, year, doi, url, pdfUrl, pdfCandidates, authors, abstract, citedBy, citationKey, bibtex };
       });
       setResults(works);
     } catch (err) {
