@@ -96,7 +96,7 @@ function PdfPage({ doc, pageNum, baseW, baseH, scale, visible, hls, flashId, reg
 }
 
 export default function PdfViewer({
-  pdfUrl, localData, title, citationKey,
+  pdfUrl, pdfUrls, landingUrl, localData, title, citationKey,
   highlights = [], onAddHighlight, onRemoveHighlight,
   jumpHl, onJumpDone,
   onSendToAi, onClose, onLocalFile,
@@ -120,7 +120,14 @@ export default function PdfViewer({
   const [flashId, setFlashId] = useState(null);
   const [readTheme, setReadTheme] = useState(() => localStorage.getItem('inkwell:pdf-theme') || 'paper');
 
-  const hasSource = Boolean(pdfUrl || localData);
+  // ordered open-access copies of this paper; the reader walks the list until one loads
+  const sources = localData ? [] : (pdfUrls?.length ? pdfUrls : (pdfUrl ? [pdfUrl] : []));
+  const sourcesKey = sources.join('|');
+  const [srcIx, setSrcIx] = useState(0);
+  useEffect(() => { setSrcIx(0); }, [sourcesKey]);
+
+  const hasSource = Boolean(localData || sources.length);
+  const activeUrl = sources.length ? sources[Math.min(srcIx, sources.length - 1)] : null;
 
   /* ── document loading ── */
   useEffect(() => {
@@ -132,7 +139,7 @@ export default function PdfViewer({
     const src = localData
       // copy: pdf.js transfers the buffer to its worker, which would detach ours
       ? { data: localData.slice() }
-      : { url: pdfUrl.startsWith('http') ? `/api/pdf?url=${encodeURIComponent(pdfUrl)}` : pdfUrl };
+      : { url: activeUrl.startsWith('http') ? `/api/pdf?url=${encodeURIComponent(activeUrl)}` : activeUrl };
     const task = getDocument(src);
     (async () => {
       try {
@@ -150,11 +157,18 @@ export default function PdfViewer({
         setDims(out);
         setDoc(d);
       } catch (err) {
-        if (!dead) setError(String(err?.message || err));
+        if (dead) return;
+        if (!localData && srcIx < sources.length - 1) {
+          setSrcIx(i => i + 1); // this copy is blocked or broken — try the next one
+        } else {
+          setError(String(err?.message || err));
+        }
       }
     })();
     return () => { dead = true; task.destroy().catch(() => {}); };
-  }, [pdfUrl, localData, hasSource, reloadTick]);
+    // sources is derived from sourcesKey; srcIx drives activeUrl
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeUrl, srcIx, localData, hasSource, reloadTick]);
 
   /* ── lazy page rendering ── */
   const registerEl = useCallback((n, el) => {
@@ -388,10 +402,15 @@ export default function PdfViewer({
       {error ? (
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '12px', color: 'var(--ink-2)', padding: '24px', textAlign: 'center' }}>
           <div style={{ fontSize: '14px', fontWeight: 600 }}>This paper couldn't be loaded</div>
-          <div style={{ fontSize: '12px', color: 'var(--ink-3)', maxWidth: '320px', lineHeight: 1.5 }}>{error}</div>
+          <div style={{ fontSize: '12px', color: 'var(--ink-3)', maxWidth: '340px', lineHeight: 1.5 }}>
+            {sources.length > 1
+              ? `All ${sources.length} known copies are blocked or offline — publishers sometimes refuse automated access.`
+              : 'The publisher blocked the download or the file is offline.'}
+          </div>
+          <div style={{ fontSize: '11px', color: 'var(--ink-3)', maxWidth: '340px', lineHeight: 1.5, opacity: .7 }}>{error}</div>
           <div style={{ display: 'flex', gap: '8px' }}>
-            <button className="tool-btn accent" style={{ border: 'none', font: 'inherit', fontSize: '12px', borderRadius: '7px', padding: '7px 14px', cursor: 'pointer' }} onClick={() => setReloadTick(t => t + 1)}>Try again</button>
-            {pdfUrl && <a href={pdfUrl} target="_blank" rel="noreferrer" style={{ fontSize: '12px', color: 'var(--acc)', alignSelf: 'center' }}>Open original ↗</a>}
+            <button className="tool-btn accent" style={{ border: 'none', font: 'inherit', fontSize: '12px', borderRadius: '7px', padding: '7px 14px', cursor: 'pointer' }} onClick={() => { setSrcIx(0); setReloadTick(t => t + 1); }}>Try again</button>
+            {(landingUrl || activeUrl) && <a href={landingUrl || activeUrl} target="_blank" rel="noreferrer" style={{ fontSize: '12px', color: 'var(--acc)', alignSelf: 'center' }}>Open on the publisher's site ↗</a>}
           </div>
         </div>
       ) : hasSource ? (
@@ -404,7 +423,7 @@ export default function PdfViewer({
           {!doc && (
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px', color: 'var(--ink-3)', fontSize: '13px', paddingTop: '80px' }}>
               <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: 'var(--acc)', animation: 'blinkDot 1.2s infinite' }} />
-              Fetching paper…
+              {srcIx > 0 ? `Trying another copy (${srcIx + 1} of ${sources.length})…` : 'Fetching paper…'}
             </div>
           )}
           {doc && dims.map((d, ix) => (

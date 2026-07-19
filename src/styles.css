@@ -61,6 +61,27 @@ input, textarea { font-family: 'Instrument Sans', system-ui, sans-serif; }
 .g-node { transition: transform .15s ease; }
 .g-node:hover { transform: translate(-50%, -50%) scale(1.12) !important; }
 
+/* image-block delete button, revealed on hover */
+.note-figure-del {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 24px;
+  height: 24px;
+  border-radius: 7px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: #fff;
+  background: rgba(20, 21, 24, .62);
+  backdrop-filter: blur(4px);
+  opacity: 0;
+  transition: opacity .12s ease, background .12s ease;
+}
+.note-figure:hover .note-figure-del { opacity: 1; }
+.note-figure-del:hover { background: rgba(20, 21, 24, .85); color: #f87171; }
+
 /* file-tree delete button, revealed on row hover */
 .tree-del { opacity: 0; transition: opacity .12s; }
 .tree-row:hover .tree-del { opacity: 1; }
@@ -370,6 +391,105 @@ textarea::placeholder { color: #4a4f5c; }
 .queue-continue {
   border: 1px solid color-mix(in oklab, var(--acc) 35%, var(--line-2));
   background: linear-gradient(160deg, color-mix(in oklab, var(--acc) 10%, var(--bg-raise)), var(--bg-raise));
+}
+
+/* ── AI deck slides ──
+   Everything inside .deck-slide is sized in em, so one component set serves
+   both thumbnail (small font-size) and fullscreen (large font-size). */
+.deck-slide {
+  aspect-ratio: 16 / 9;
+  width: 100%;
+  border-radius: 10px;
+  overflow: hidden;
+  background: #16171b;
+  color: #e8eaf0;
+  border: 1px solid var(--line-2);
+  display: flex;
+}
+.deck-slide.light { background: #f4f1e9; color: #26221a; border-color: #ddd6c4; }
+.deck-slide-inner {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 1.1em;
+  padding: 2.4em 3em;
+  font-size: 1em;
+}
+.deck-slide-inner.layout-title,
+.deck-slide-inner.layout-end,
+.deck-slide-inner.layout-statement { align-items: center; text-align: center; }
+.deck-eyebrow {
+  font-size: .85em;
+  font-weight: 600;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--acc, #fbbf24);
+}
+.deck-title { display: flex; flex-direction: column; gap: .7em; align-items: inherit; }
+.deck-title-rule { width: 2.6em; height: .22em; border-radius: 99px; background: var(--acc, #fbbf24); }
+.deck-title h1 {
+  margin: 0;
+  font-family: 'Fraunces', Georgia, serif;
+  font-size: 3em;
+  font-weight: 700;
+  letter-spacing: -.02em;
+  line-height: 1.12;
+}
+.deck-title p { margin: 0; font-size: 1.15em; opacity: .62; }
+.deck-heading {
+  margin: 0;
+  font-family: 'Fraunces', Georgia, serif;
+  font-size: 2em;
+  font-weight: 600;
+  letter-spacing: -.015em;
+  line-height: 1.2;
+}
+.deck-bullets { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .75em; text-align: left; }
+.deck-bullets li { display: flex; gap: .8em; align-items: baseline; font-size: 1.25em; line-height: 1.45; }
+.deck-bullet-mark {
+  flex-shrink: 0;
+  width: .48em; height: .48em; border-radius: 50%;
+  background: var(--acc, #fbbf24);
+  position: relative; top: -0.12em;
+  font-size: 1em; color: transparent; overflow: hidden;
+}
+.deck-bullets.numbered .deck-bullet-mark {
+  width: auto; height: auto; border-radius: 0; background: none;
+  color: var(--acc, #fbbf24); font-weight: 700; overflow: visible; top: 0;
+  font-variant-numeric: tabular-nums;
+}
+.deck-text { margin: 0; font-size: 1.3em; line-height: 1.55; max-width: 34em; }
+.deck-text.dim { opacity: .6; font-size: 1.1em; }
+.layout-statement .deck-text { font-family: 'Fraunces', Georgia, serif; font-size: 2.1em; line-height: 1.3; font-weight: 550; }
+.deck-quote { margin: 0; max-width: 30em; display: flex; flex-direction: column; gap: .8em; }
+.deck-quote p {
+  margin: 0;
+  font-family: 'Fraunces', Georgia, serif;
+  font-size: 1.7em;
+  line-height: 1.4;
+  font-style: italic;
+}
+.deck-quote cite { font-size: .95em; font-style: normal; opacity: .6; }
+.deck-stat { display: flex; flex-direction: column; gap: .3em; align-items: center; text-align: center; }
+.deck-stat-value {
+  font-family: 'Fraunces', Georgia, serif;
+  font-size: 3.2em;
+  font-weight: 700;
+  letter-spacing: -.02em;
+  color: var(--acc, #fbbf24);
+  line-height: 1;
+}
+.deck-stat-label { font-size: .95em; opacity: .65; max-width: 14em; line-height: 1.35; }
+.deck-columns { display: flex; gap: 2.2em; align-items: stretch; justify-content: center; width: 100%; min-height: 0; }
+.deck-columns > * { flex: 1; min-width: 0; }
+.deck-image { margin: 0; display: flex; flex-direction: column; gap: .5em; min-height: 0; flex: 1; }
+.deck-image img { max-width: 100%; max-height: 100%; min-height: 0; object-fit: contain; border-radius: .4em; }
+.deck-image figcaption { font-size: .85em; opacity: .6; }
+.deck-missing {
+  border: 1px dashed currentColor; opacity: .45; border-radius: .5em;
+  padding: 1.5em; font-size: .9em; text-align: center;
 }
 
 /* PDF + note workspace — a deliberate ink seam, not an IDE divider. */

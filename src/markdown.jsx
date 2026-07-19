@@ -45,6 +45,8 @@ export function parseBlocks(text) {
       push({ t: 'table', header, rows }, start);
       continue;
     }
+    const im = l.match(/^!\[([^\]]*)\]\((\S+)\)\s*$/);
+    if (im) { i++; push({ t: 'image', alt: im[1], src: im[2] }, start); continue; }
     if (/^\s*([-*]|\d+\.)\s+/.test(l)) {
       const ordered = /^\s*\d+\.\s+/.test(l);
       const items = [];
@@ -61,7 +63,7 @@ export function parseBlocks(text) {
     if (l.trim() === '') { i++; continue; }
     const buf = [l];
     i++;
-    while (i < lines.length && lines[i].trim() !== '' && !/^(#{1,3}\s|```|>\s?|---+\s*$|\s*([-*]|\d+\.)\s+)/.test(lines[i])) {
+    while (i < lines.length && lines[i].trim() !== '' && !/^(#{1,3}\s|```|>\s?|---+\s*$|!\[|\s*([-*]|\d+\.)\s+)/.test(lines[i])) {
       buf.push(lines[i]);
       i++;
     }

@@ -5,6 +5,8 @@ import {
 import { askAssistant, buildVaultContext } from './assistant.js';
 import { parseBlocks, stripInline, extractWikiNames } from './markdown.jsx';
 import { loadHighlightStore, findHighlight, paperIdOf } from './highlights.js';
+import { generateDeckSpec } from './deck/generate.js';
+import { deckSlideKeys } from './deck/registry.jsx';
 import IconRail from './components/IconRail.jsx';
 import Sidebar from './components/Sidebar.jsx';
 import TabBar from './components/TabBar.jsx';
@@ -67,6 +69,7 @@ export default function App() {
   const [files, setFiles] = useState(saved.files ?? INITIAL_FILES);
   const [docs, setDocs] = useState(saved.docs ?? INITIAL_DOCS);
   const [sketches, setSketches] = useState(() => saved.sketches ?? buildInitialSketches());
+  const [images, setImages] = useState(saved.images ?? {});
   const [activeFile, setActiveFile] = useState((saved.files ?? INITIAL_FILES).find(f => !f.folder)?.id ?? null);
   const [openTabs, setOpenTabs] = useState(() => {
     const first = (saved.files ?? INITIAL_FILES).find(f => !f.folder);
@@ -84,6 +87,8 @@ export default function App() {
   const [importNote, setImportNote] = useState(false);
   const [present, setPresent] = useState(false);
   const [slideIx, setSlideIx] = useState(0);
+  const [decks, setDecks] = useState(saved.decks ?? {}); // AI deck spec per note id
+  const [deckBusy, setDeckBusy] = useState(false);
 
   const [aiMessages, setAiMessages] = useState(INITIAL_MSGS);
   const [aiInput, setAiInput] = useState('');
@@ -186,7 +191,12 @@ export default function App() {
     const noteId = inLibrary
       ? ensurePaperNote({ paperId: pid, title: ref.title, citationKey: ref.citationKey })
       : importReference(ref);
-    setActivePdf({ url: ref.pdfUrl, title: ref.title, citationKey: ref.citationKey, paperId: pid, noteId });
+    setActivePdf({
+      url: ref.pdfUrl,
+      urls: ref.pdfCandidates?.length ? ref.pdfCandidates : [ref.pdfUrl],
+      landing: ref.url,
+      title: ref.title, citationKey: ref.citationKey, paperId: pid, noteId,
+    });
     setReferences(rs => rs.map(r => (paperIdOf(r) === pid
       ? { ...r, status: r.status === 'done' ? 'done' : 'reading', lastOpenedAt: Date.now() }
       : r)));
@@ -283,7 +293,12 @@ export default function App() {
         return;
       }
       const noteId = ensurePaperNote({ paperId: pid, title: ref.title, citationKey: ref.citationKey });
-      setActivePdf({ url: ref.pdfUrl, title: ref.title, citationKey: ref.citationKey, paperId: pid, noteId });
+      setActivePdf({
+        url: ref.pdfUrl,
+        urls: ref.pdfCandidates?.length ? ref.pdfCandidates : [ref.pdfUrl],
+        landing: ref.url,
+        title: ref.title, citationKey: ref.citationKey, paperId: pid, noteId,
+      });
       setOpenTabs(t => (t.includes(noteId) ? t : [...t, noteId]));
       setActiveFile(noteId);
       setSidebarOpen(false);
@@ -302,11 +317,11 @@ export default function App() {
   useEffect(() => {
     const t = setTimeout(() => {
       try {
-        localStorage.setItem('inkwell:v3', JSON.stringify({ files, docs, sketches, settings, theme }));
+        localStorage.setItem('inkwell:v3', JSON.stringify({ files, docs, sketches, images, decks, settings, theme }));
       } catch { /* storage unavailable — the vault just won't persist */ }
     }, 250);
     return () => clearTimeout(t);
-  }, [files, docs, sketches, settings, theme]);
+  }, [files, docs, sketches, images, decks, settings, theme]);
 
   const activeNote = files.find(f => f.id === activeFile && !f.folder) || null;
   const activeDoc = activeNote ? (docs[activeNote.id] ?? '') : '';
@@ -316,6 +331,37 @@ export default function App() {
     () => (activeNote ? buildSlides(activeNote.name, crumb, activeDoc) : []),
     [activeNote, crumb, activeDoc],
   );
+
+  const activeDeck = (activeNote && decks[activeNote.id]) || null;
+  const slideCount = activeDeck ? deckSlideKeys(activeDeck).length : slides.length;
+
+  /** Ask the assistant to design a json-render deck from the open note. */
+  const generateDeck = async () => {
+    if (!activeNote || deckBusy) return;
+    setDeckBusy(true);
+    try {
+      const noteBlocks = parseBlocks(activeDoc);
+      const spec = await generateDeckSpec({
+        noteName: activeNote.name,
+        doc: activeDoc,
+        sketchIds: noteBlocks.filter(b => b.t === 'sketch').map(b => b.id),
+        imageIds: noteBlocks.filter(b => b.t === 'image' && b.src.startsWith('img:')).map(b => b.src.slice(4)),
+        settings,
+      });
+      setDecks(d => ({ ...d, [activeNote.id]: spec }));
+      setSlideIx(0);
+    } catch (e) {
+      alert(e.message || 'Deck generation failed — try again.');
+    } finally {
+      setDeckBusy(false);
+    }
+  };
+
+  const clearDeck = () => {
+    if (!activeNote) return;
+    setDecks(d => { const out = { ...d }; delete out[activeNote.id]; return out; });
+    setSlideIx(0);
+  };
 
   useEffect(() => {
     const kd = (e) => {
@@ -337,14 +383,14 @@ export default function App() {
 
   useEffect(() => {
     if (!present) return;
-    const max = Math.max(0, slides.length - 1);
+    const max = Math.max(0, slideCount - 1);
     const kd = (e) => {
       if (e.key === 'ArrowRight') setSlideIx(i => Math.min(max, i + 1));
       if (e.key === 'ArrowLeft') setSlideIx(i => Math.max(0, i - 1));
     };
     window.addEventListener('keydown', kd);
     return () => window.removeEventListener('keydown', kd);
-  }, [present, slides.length]);
+  }, [present, slideCount]);
 
   const openFile = (id) => {
     const f = files.find(x => x.id === id);
@@ -413,7 +459,9 @@ export default function App() {
     const f = files.find(x => x.id === id);
     if (!f || f.folder) return;
     if (!window.confirm(`Delete "${f.name}"? This can't be undone.`)) return;
-    const doomedSketches = parseBlocks(docs[id] ?? '').filter(b => b.t === 'sketch').map(b => b.id);
+    const doomedBlocks = parseBlocks(docs[id] ?? '');
+    const doomedSketches = doomedBlocks.filter(b => b.t === 'sketch').map(b => b.id);
+    const doomedImages = doomedBlocks.filter(b => b.t === 'image' && b.src.startsWith('img:')).map(b => b.src.slice(4));
     setFiles(fs => fs.filter(x => x.id !== id));
     setDocs(d => { const out = { ...d }; delete out[id]; return out; });
     setSketches(s => {
@@ -421,6 +469,12 @@ export default function App() {
       for (const sk of doomedSketches) delete out[sk];
       return out;
     });
+    setImages(s => {
+      const out = { ...s };
+      for (const im of doomedImages) delete out[im];
+      return out;
+    });
+    setDecks(d => { const out = { ...d }; delete out[id]; return out; });
     setOpenTabs(t => t.filter(x => x !== id));
     if (activeFile === id) {
       const rest = openTabs.filter(x => x !== id);
@@ -460,6 +514,17 @@ export default function App() {
     });
   };
 
+  const setImageData = (imgId, data) => {
+    setImages(s => {
+      if (data == null) {
+        const out = { ...s };
+        delete out[imgId];
+        return out;
+      }
+      return { ...s, [imgId]: data };
+    });
+  };
+
   const sendMessage = async (text) => {
     const t = text.trim();
     if (!t || aiTyping) return;
@@ -469,7 +534,7 @@ export default function App() {
     setAiTyping(true);
     try {
       const vault = buildVaultContext(files, docs, activeFile);
-      const { text: reply, provider } = await askAssistant({ history, vault, preferLocal: settings.localAi });
+      const { text: reply, provider } = await askAssistant({ history, vault, preferLocal: settings.localAi, settings });
       setAiProvider(provider);
       setAiMessages(m => [...m, { role: 'a', text: reply }]);
     } catch {
@@ -493,7 +558,7 @@ export default function App() {
     settings: settingsOpen,
   };
 
-  const editorPanel = (
+  const editorPanel = (alignTop = false) => (
     <div className="workspace-editor-panel">
       <Editor
         note={activeNote} crumb={crumb} doc={activeDoc} files={files} docs={docs}
@@ -505,6 +570,8 @@ export default function App() {
         onNewNote={newNote}
         spell={settings.spell} grid={theme.grid} paper={theme.paper} accent={theme.accent}
         sketches={sketches} setSketchData={setSketchData}
+        images={images} setImageData={setImageData}
+        alignTop={alignTop}
         references={references}
       />
     </div>
@@ -513,6 +580,8 @@ export default function App() {
   const pdfPanel = activePdf && (
     <PdfViewer
       pdfUrl={activePdf.url}
+      pdfUrls={activePdf.urls}
+      landingUrl={activePdf.landing}
       localData={activePdf.localData}
       title={activePdf.title}
       citationKey={activePdf.citationKey}
@@ -631,18 +700,20 @@ export default function App() {
           )}
 
           <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
-            {view === 'editor' && !pdfHere && editorPanel}
+            {view === 'editor' && !pdfHere && editorPanel()}
             {view === 'editor' && pdfHere && workspaceLayout === 'split' && (
-              <WorkspaceSplit left={pdfPanel} right={editorPanel} initialRatio={workspaceRatio} onRatioChange={setWorkspaceRatio} />
+              <WorkspaceSplit left={pdfPanel} right={editorPanel(true)} initialRatio={workspaceRatio} onRatioChange={setWorkspaceRatio} />
             )}
             {view === 'editor' && pdfHere && workspaceLayout === 'pdf' && <div className="workspace-single-panel">{pdfPanel}</div>}
-            {view === 'editor' && pdfHere && workspaceLayout === 'editor' && editorPanel}
+            {view === 'editor' && pdfHere && workspaceLayout === 'editor' && editorPanel()}
             {view === 'graph' && <GraphView files={files} docs={docs} onOpen={openFile} />}
             {view === 'slides' && (
               <SlidesView
                 noteName={activeNote ? activeNote.name : 'No note'}
                 slides={slides}
                 template={slideTemplate} importNote={importNote} sketches={sketches}
+                deck={activeDeck} deckBusy={deckBusy} images={images}
+                onGenerateDeck={generateDeck} onClearDeck={clearDeck}
                 onTemplate={(t) => { setSlideTemplate(t); setImportNote(t === 'import'); }}
                 onPresent={() => { setPresent(true); setSlideIx(0); }}
               />
@@ -667,16 +738,17 @@ export default function App() {
       {settingsOpen && (
         <SettingsModal
           settings={settings} setSettings={setSettings} theme={theme} setTheme={setTheme}
-          vault={{ files, docs, sketches, settings, theme }}
+          vault={{ files, docs, sketches, images, decks, settings, theme }}
           onClose={() => setSettingsOpen(false)}
         />
       )}
-      {present && slides.length > 0 && (
+      {present && slideCount > 0 && (
         <PresentOverlay
-          template={slideTemplate} slideIx={Math.min(slideIx, slides.length - 1)} slides={slides} sketches={sketches}
+          template={slideTemplate} slideIx={Math.min(slideIx, slideCount - 1)} slides={slides} sketches={sketches}
+          deck={activeDeck} images={images}
           onClose={() => setPresent(false)}
           onPrev={() => setSlideIx(i => Math.max(0, i - 1))}
-          onNext={() => setSlideIx(i => Math.min(slides.length - 1, i + 1))}
+          onNext={() => setSlideIx(i => Math.min(slideCount - 1, i + 1))}
           onGo={setSlideIx}
         />
       )}

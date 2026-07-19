@@ -1,10 +1,16 @@
+import { Renderer } from '@json-render/react';
 import { monthYear } from '../data.js';
 import SketchSnapshot from './SketchSnapshot.jsx';
+import { deckRegistry, DeckAssets, DeckProviders, deckSlideKeys, slideSpec } from '../deck/registry.jsx';
+import { SlideBoundary } from './SlidesView.jsx';
 
-export default function PresentOverlay({ template, slideIx, slides, sketches, onClose, onPrev, onNext, onGo }) {
+export default function PresentOverlay({ template, slideIx, slides, sketches, deck, images, onClose, onPrev, onNext, onGo }) {
   const light = template === 'light';
   const ink = light ? '#26221a' : '#e8eaf0';
-  const slide = slides[slideIx];
+  const slideKeys = deck ? deckSlideKeys(deck) : [];
+  const total = deck ? slideKeys.length : slides.length;
+  const slide = deck ? null : slides[slideIx];
+  const deckSlideKey = deck ? slideKeys[Math.min(slideIx, slideKeys.length - 1)] : null;
 
   return (
     <div style={{
@@ -15,6 +21,20 @@ export default function PresentOverlay({ template, slideIx, slides, sketches, on
       <div className="hv-fade" onClick={onClose} style={{ position: 'absolute', top: '18px', right: '20px', width: '32px', height: '32px', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: 'inherit' }}>
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><path d="M5 5l14 14M19 5L5 19" /></svg>
       </div>
+
+      {deck && deckSlideKey && (
+        <div key={slideIx} style={{ width: 'min(1180px, 90vw)', animation: 'fadeUp .3s ease-out' }}>
+          <DeckAssets.Provider value={{ sketches, images: images || {}, light }}>
+            <DeckProviders>
+              <div className={'deck-slide deck-present' + (light ? ' light' : '')} style={{ fontSize: 'min(1.4vw, 2.5vh)', boxShadow: '0 30px 80px rgba(0,0,0,.4)' }}>
+                <SlideBoundary>
+                  <Renderer spec={slideSpec(deck, deckSlideKey)} registry={deckRegistry} />
+                </SlideBoundary>
+              </div>
+            </DeckProviders>
+          </DeckAssets.Provider>
+        </div>
+      )}
 
       {slide && slide.type === 'title' && (
         <div key={slideIx} style={{ textAlign: 'center', animation: 'fadeUp .3s ease-out' }}>
@@ -49,7 +69,7 @@ export default function PresentOverlay({ template, slideIx, slides, sketches, on
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 5l-7 7 7 7" /></svg>
         </div>
         <div style={{ display: 'flex', gap: '7px' }}>
-          {slides.map((_, ix) => (
+          {Array.from({ length: total }).map((_, ix) => (
             <span key={ix} onClick={() => onGo(ix)} style={{ width: '8px', height: '8px', borderRadius: '50%', cursor: 'pointer', background: slideIx === ix ? 'var(--acc)' : (light ? '#d5cfbf' : '#2c2f37'), display: 'inline-block' }} />
           ))}
         </div>
