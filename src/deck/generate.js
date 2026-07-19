@@ -2,7 +2,7 @@
 // catalog.prompt() teaches the model the JSONL patch format + component contract;
 // we add slide-design rules and the note's content + available assets.
 import { createSpecStreamCompiler, validateSpec, autoFixSpec } from '@json-render/core';
-import { completeChat } from '../assistant.js';
+import { openRouterComplete, completeChat } from '../assistant.js';
 import { deckCatalog } from './catalog.js';
 import { deckSlideKeys } from './registry.jsx';
 
@@ -109,45 +109,71 @@ export async function generateDeckSpec({ noteName, doc, sketchIds = [], imageIds
     (doc || '').slice(0, 6000),
   ].join('\n');
 
-  // provider chain (OpenRouter with the user's key → free cloud → ollama),
-  // with one automatic retry — free gateways are occasionally flaky
+  const messages = [
+    { role: 'system', content: system },
+    { role: 'user', content: user },
+  ];
+
+  // Decks need a capable model. Prefer OpenRouter (with 429 backoff); only
+  // fall back to the keyless gateway when no key is set, and treat its
+  // reasoning-model empty replies as the "add a key" case rather than a crash.
   let raw = '';
-  let lastErr = null;
-  for (let attempt = 0; attempt < 2 && !raw; attempt++) {
-    try {
-      const { text, finishReason } = await completeChat({
-        maxTokens: 4000, // default caps are far too small for a whole deck
-        settings,
-        messages: [
-          { role: 'system', content: system },
-          { role: 'user', content: user },
-        ],
-      });
-      if (finishReason === 'length') throw new Error('The deck came back cut off — try again.');
-      raw = text;
-    } catch (e) {
-      lastErr = e;
+  if (settings?.openrouterKey) {
+    const { text, finishReason } = await openRouterComplete({ messages, maxTokens: 4000, settings });
+    if (finishReason === 'length') throw new Error('The deck came back cut off — try again.');
+    raw = text;
+  } else {
+    const { text, finishReason } = await completeChat({ messages, maxTokens: 4000, settings });
+    if (finishReason === 'length' || !text) {
+      throw new Error('The free model couldn\'t produce a deck. Add an OpenRouter key in Settings for reliable results.');
     }
+    raw = text;
   }
-  if (!raw) throw lastErr ?? new Error('Deck generation failed — try again.');
 
   let spec = compileReply(raw);
-  const fixed = autoFixSpec(spec);
-  if (fixed?.spec) spec = fixed.spec;
-
-  const { valid } = validateSpec(spec) || {};
   if (!spec?.root || !spec?.elements) throw new Error('The generated deck was malformed — try again.');
 
-  // drop anything outside the catalog so the renderer never sees unknown types
-  const known = new Set(deckCatalog.componentNames || []);
-  for (const [key, el] of Object.entries(spec.elements)) {
-    if (!known.has(el?.type)) delete spec.elements[key];
+  // Sanitize structure BEFORE the library sees it: models routinely reference
+  // child keys they never emit (e.g. a Slide pointing at a heading that got
+  // truncated), and validateSpec/autoFixSpec throw when they follow one.
+  sanitizeStructure(spec);
+
+  // library best-effort pass — never let its internals kill a usable deck
+  try {
+    const fixed = autoFixSpec(spec);
+    if (fixed?.spec?.root && fixed.spec.elements) { spec = fixed.spec; sanitizeStructure(spec); }
+    const { valid } = validateSpec(spec) || {};
+    if (!valid) console.warn('deck spec has validation warnings (rendering anyway)');
+  } catch (e) {
+    console.warn('json-render post-processing skipped:', e.message);
   }
-  for (const el of Object.values(spec.elements)) {
-    if (el.children) el.children = el.children.filter(k => spec.elements[k] !== undefined);
-  }
+
   if (!spec.elements[spec.root]) throw new Error('The generated deck was malformed — try again.');
   if (deckSlideKeys(spec).length === 0) throw new Error('The generated deck had no slides — try again.');
-  if (!valid) console.warn('deck spec generated with validation warnings');
   return spec;
+}
+
+/** Make a spec safe to traverse: known types only, no dangling child refs,
+    no empty slides, and a Deck root whose children are real Slides. */
+function sanitizeStructure(spec) {
+  const known = new Set(deckCatalog.componentNames || []);
+  // drop unknown/malformed elements
+  for (const [key, el] of Object.entries(spec.elements)) {
+    if (!el || typeof el !== 'object' || !known.has(el.type)) delete spec.elements[key];
+  }
+  // normalize + strip references to elements that don't exist
+  for (const el of Object.values(spec.elements)) {
+    if (!el.props || typeof el.props !== 'object') el.props = {};
+    el.children = Array.isArray(el.children) ? el.children.filter(k => spec.elements[k]) : [];
+  }
+  // drop content slides that lost all their children to truncation
+  for (const [key, el] of Object.entries(spec.elements)) {
+    if (el.type === 'Slide' && el.children.length === 0 && el.props.layout !== 'title' && el.props.layout !== 'end') {
+      delete spec.elements[key];
+    }
+  }
+  // re-strip now-dangling refs (a deleted slide leaves the Deck pointing at it)
+  for (const el of Object.values(spec.elements)) {
+    el.children = el.children.filter(k => spec.elements[k]);
+  }
 }

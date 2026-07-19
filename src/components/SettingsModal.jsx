@@ -68,7 +68,7 @@ export default function SettingsModal({ settings, setSettings, theme, setTheme, 
           <div style={{ padding: '11px 0', borderBottom: '1px solid #26292f' }}>
             <div style={{ fontSize: '13.5px', fontWeight: 500 }}>OpenRouter API key</div>
             <div style={{ fontSize: '12px', color: '#8b90a0', marginBottom: '8px' }}>
-              Free key from <a href="https://openrouter.ai/keys" target="_blank" rel="noreferrer" style={{ color: 'var(--acc)' }}>openrouter.ai/keys</a> — used for chat and deck design (model: {settings.openrouterModel || 'openai/gpt-oss-20b:free'}). Stays in this browser.
+              Free key from <a href="https://openrouter.ai/keys" target="_blank" rel="noreferrer" style={{ color: 'var(--acc)' }}>openrouter.ai/keys</a> — used for chat and deck design (model: {settings.openrouterModel || 'google/gemma-4-26b-a4b-it:free'}). Stays in this browser.
             </div>
             <input
               type="password"
@@ -78,6 +78,16 @@ export default function SettingsModal({ settings, setSettings, theme, setTheme, 
               spellCheck={false}
               style={{ width: '100%', background: '#16181d', border: '1px solid #2c2f37', borderRadius: '8px', padding: '8px 10px', color: '#dadde5', fontSize: '12.5px', outline: 'none' }}
             />
+            <select
+              value={settings.openrouterModel || 'google/gemma-4-26b-a4b-it:free'}
+              onChange={(e) => setSettings(s => ({ ...s, openrouterModel: e.target.value }))}
+              style={{ width: '100%', marginTop: '8px', background: '#16181d', border: '1px solid #2c2f37', borderRadius: '8px', padding: '8px 10px', color: '#dadde5', fontSize: '12.5px', outline: 'none' }}
+            >
+              <option value="google/gemma-4-26b-a4b-it:free">Gemma 4 26B (free · fastest)</option>
+              <option value="google/gemma-4-31b-it:free">Gemma 4 31B (free · often rate-limited)</option>
+              <option value="meta-llama/llama-3.3-70b-instruct:free">Llama 3.3 70B (free)</option>
+              <option value="openai/gpt-oss-20b:free">GPT-OSS 20B (free · slow)</option>
+            </select>
           </div>
 
           <div style={SECTION}>Appearance</div>

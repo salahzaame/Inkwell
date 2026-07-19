@@ -64,7 +64,11 @@ async function askPollinations(messages, maxTokens) {
   return { text, provider: 'pollinations · free cloud', local: false, finishReason: j.choices?.[0]?.finish_reason };
 }
 
-export const OPENROUTER_DEFAULT_MODEL = 'openai/gpt-oss-20b:free';
+// Gemma is a plain instruction model (no hidden reasoning budget), so it
+// answers without exhausting max_tokens the way gpt-oss's reasoning did.
+// The 26b-a4b (mixture-of-experts) free tier is far less rate-limited upstream
+// than 31b; both are the same Gemma 4 family. Override in Settings if desired.
+export const OPENROUTER_DEFAULT_MODEL = 'google/gemma-4-26b-a4b-it:free';
 
 async function askOpenRouter(messages, maxTokens, { key, model }) {
   // OpenRouter allows browser calls with the user's own key (kept in settings)
@@ -79,12 +83,43 @@ async function askOpenRouter(messages, maxTokens, { key, model }) {
     body: JSON.stringify({ model: model || OPENROUTER_DEFAULT_MODEL, messages, ...(maxTokens ? { max_tokens: maxTokens } : {}) }),
     signal: AbortSignal.timeout(90000),
   });
-  if (!res.ok) throw new Error('openrouter HTTP ' + res.status);
-  const j = await res.json();
+  const j = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const err = new Error(j?.error?.message || ('openrouter HTTP ' + res.status));
+    err.status = res.status;
+    err.rateLimited = res.status === 429;
+    throw err;
+  }
   const text = (j.choices?.[0]?.message?.content || '').trim();
   if (!text) throw new Error('openrouter empty reply');
   const shortModel = (model || OPENROUTER_DEFAULT_MODEL).split('/').pop().replace(/:free$/, '');
   return { text, provider: shortModel + ' · openrouter', local: false, finishReason: j.choices?.[0]?.finish_reason };
+}
+
+/**
+ * OpenRouter completion with backoff on transient upstream rate limits (429).
+ * Used by deck generation, which needs a capable model and can't fall back to
+ * the keyless gateway. Throws if no key is set or all retries are exhausted.
+ */
+export async function openRouterComplete({ messages, maxTokens, settings, tries = 3 }) {
+  if (!settings?.openrouterKey) {
+    const e = new Error('Add a free OpenRouter key in Settings → Assistant providers to design decks.');
+    e.noKey = true;
+    throw e;
+  }
+  const opts = { key: settings.openrouterKey, model: settings.openrouterModel };
+  let lastErr;
+  for (let i = 0; i < tries; i++) {
+    try {
+      return await askOpenRouter(messages, maxTokens, opts);
+    } catch (e) {
+      lastErr = e;
+      if (!e.rateLimited || i === tries - 1) break;
+      await new Promise(r => setTimeout(r, 4000 * (i + 1))); // 4s, 8s backoff
+    }
+  }
+  if (lastErr?.rateLimited) throw new Error('The free model is busy right now (rate-limited upstream). Wait a moment and try again.');
+  throw lastErr;
 }
 
 function providerChain({ preferLocal, settings, maxTokens }) {
