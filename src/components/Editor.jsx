@@ -1,11 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
+import { convertToExcalidrawElements } from '@excalidraw/excalidraw';
 import { fmtEdited } from '../data.js';
 import { parseBlocks, Inline, toggleTaskInDoc, extractTags, findMentions } from '../markdown.jsx';
 import { fileToCompressedDataUrl, newImageId } from '../images.js';
 import { BIBLIOGRAPHY_STYLES, generateBibliography } from '../bibliography.js';
 import { wikilinkEditorHtml } from '../wiki-editor.js';
 import { addTableRowToDoc, updateTableCellInDoc } from '../tables.js';
+import { MERMAID_SNIPPET, diagramErrorMessage, isMermaidBlock, replaceBlockWithSketchFence } from '../diagrams.js';
 import SketchCanvas from './SketchCanvas.jsx';
+import MermaidDiagram from './MermaidDiagram.jsx';
 
 /* ── palettes: warm "paper" page (Inkwell's signature) vs classic dark ── */
 const PAL = {
@@ -33,6 +36,7 @@ const SLASH_COMMANDS = [
   { id: 'table', label: 'Table', glyph: '⊞', snippet: '| Column 1 | Column 2 | Column 3 |\n| --- | --- | --- |\n|   |   |   |\n|   |   |   |\n', caretOffset: 2 },
   { id: 'quote', label: 'Quote', glyph: '❝', snippet: '> ' },
   { id: 'code', label: 'Code block', glyph: '</>', snippet: '```\n\n```\n', caretOffset: 4 },
+  { id: 'diagram', label: 'Diagram (Mermaid)', glyph: '◈', snippet: MERMAID_SNIPPET, commitBlock: true },
   { id: 'divider', label: 'Divider', glyph: '—', snippet: '---\n\n', commitBlock: true },
   { id: 'sketch', label: 'Sketch (Excalidraw)', glyph: '✎', sketch: true, commitBlock: true },
   { id: 'image', label: 'Image (or just paste one)', glyph: '▣', image: true },
@@ -127,7 +131,7 @@ function EditableTable({ block, pal, doc, onDocChange, spellCheck }) {
   );
 }
 
-function RenderedBlock({ b, pal, doc, onDocChange, onWiki, images = {}, onDeleteImage, spellCheck }) {
+function RenderedBlock({ b, pal, doc, onDocChange, onWiki, images = {}, onDeleteImage, spellCheck, onConvertDiagram, convertingDiagram }) {
   const pStyle = { fontSize: '15.5px', lineHeight: 1.75, color: pal.body, margin: '0 0 22px' };
   const toggleTask = (ix) => onDocChange(toggleTaskInDoc(doc, ix));
 
@@ -171,6 +175,16 @@ function RenderedBlock({ b, pal, doc, onDocChange, onWiki, images = {}, onDelete
       <blockquote style={{ ...pStyle, padding: '2px 0 2px 14px', borderLeft: '2.5px solid color-mix(in oklab, var(--acc) 55%, transparent)', color: pal.muted }}>
         <Inline text={b.text} onWiki={onWiki} />
       </blockquote>
+    );
+  }
+  if (isMermaidBlock(b)) {
+    return (
+      <MermaidDiagram
+        text={b.text}
+        pal={pal}
+        converting={convertingDiagram === b.line0}
+        onConvertToSketch={onConvertDiagram ? () => onConvertDiagram(b) : null}
+      />
     );
   }
   if (b.t === 'code') {
@@ -237,6 +251,8 @@ export default function Editor({
   const [citeMenu, setCiteMenu] = useState(null);
   const [citeIx, setCiteIx] = useState(0);
   const [bibliographyStyle, setBibliographyStyle] = useState('apa');
+  const [convertingDiagram, setConvertingDiagram] = useState(null); // line0 of the block being converted
+  const [diagramError, setDiagramError] = useState(null);
 
   const pal = paper ? PAL.paper : PAL.dark;
   const blocks = parseBlocks(doc);
@@ -431,6 +447,33 @@ export default function Editor({
     const L = linesOf(doc);
     onDocChange([...L.slice(0, b.line0), ...L.slice(b.line1)].join('\n'));
     setSketchData(b.id, null);
+  };
+
+  /**
+   * Turn a rendered mermaid diagram into a real Excalidraw scene, in place.
+   * The assistant is good at laying a diagram out; hand-editing is where
+   * Excalidraw wins — so this hands the layout over rather than starting blank.
+   */
+  const convertDiagramToSketch = async (b) => {
+    if (convertingDiagram !== null) return;
+    setConvertingDiagram(b.line0);
+    setDiagramError(null);
+    try {
+      // only the mermaid parser is worth code-splitting; excalidraw is already
+      // in the main graph via SketchCanvas, so importing it lazily buys nothing
+      const { parseMermaidToExcalidraw } = await import('@excalidraw/mermaid-to-excalidraw');
+      const { elements, files } = await parseMermaidToExcalidraw(String(b.text || '').trim());
+      const scene = { elements: convertToExcalidrawElements(elements), files: files ?? {} };
+      if (!scene.elements.length) throw new Error('That diagram produced no shapes.');
+      const skId = onCreateSketch();
+      setSketchData(skId, scene);
+      if (focus) { setFocus(null); setSlash(null); }
+      onDocChange(replaceBlockWithSketchFence(doc, b, skId));
+    } catch (e) {
+      setDiagramError(diagramErrorMessage(e));
+    } finally {
+      setConvertingDiagram(null);
+    }
   };
 
   /** Remove an image block and purge its bytes from the vault. */
@@ -836,13 +879,17 @@ export default function Editor({
       <div
         key={b.t + '-' + b.line0}
         onMouseDown={(e) => {
-          if (e.target.closest('a, [data-cb], [data-table-cell], [data-table-control]')) return;
+          if (e.target.closest('a, [data-cb], [data-table-cell], [data-table-control], [data-diagram-control]')) return;
           e.preventDefault();
           navTo(b, 'end');
         }}
         style={{ cursor: 'text' }}
       >
-        <RenderedBlock b={b} pal={pal} doc={doc} onDocChange={onDocChange} onWiki={onWiki} images={images} onDeleteImage={deleteImageBlock} spellCheck={spell} />
+        <RenderedBlock
+          b={b} pal={pal} doc={doc} onDocChange={onDocChange} onWiki={onWiki}
+          images={images} onDeleteImage={deleteImageBlock} spellCheck={spell}
+          onConvertDiagram={convertDiagramToSketch} convertingDiagram={convertingDiagram}
+        />
       </div>,
     );
   });
@@ -937,6 +984,20 @@ export default function Editor({
             ))}
             <span style={{ color: pal.faint }}>{fmtEdited(note.mtime)}</span>
           </div>
+
+          {diagramError && (
+            <div
+              data-diagram-control
+              onMouseDown={(e) => e.stopPropagation()}
+              style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', margin: '0 0 18px', padding: '9px 12px', border: `1px dashed ${pal.border}`, borderRadius: '8px', fontSize: '12px', color: pal.muted }}
+            >
+              <span>Couldn’t turn that diagram into a sketch — {diagramError}</span>
+              <button type="button" data-diagram-control onClick={() => setDiagramError(null)}
+                style={{ border: 'none', background: 'transparent', color: pal.muted, cursor: 'pointer', font: 'inherit', fontSize: '12px' }}>
+                Dismiss
+              </button>
+            </div>
+          )}
 
           {items}
 

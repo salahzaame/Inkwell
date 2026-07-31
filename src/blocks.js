@@ -27,11 +27,14 @@ export function parseBlocks(text) {
     const l = lines[i];
     if (/^```/.test(l)) {
       const m = l.match(/^```sketch\s+(\S+)/);
+      // the info string after ``` — "mermaid", "js", etc. Kept so renderers can
+      // opt in to a language (diagrams) instead of every fence being plain code.
+      const lang = l.slice(3).trim().split(/\s+/)[0].toLowerCase() || null;
       i++;
       const buf = [];
       while (i < lines.length && !/^```/.test(lines[i])) { buf.push(lines[i]); i++; }
       i++; // closing fence
-      push(m ? { t: 'sketch', id: m[1] } : { t: 'code', text: buf.join('\n') }, start);
+      push(m ? { t: 'sketch', id: m[1] } : { t: 'code', lang, text: buf.join('\n') }, start);
       continue;
     }
     const h = l.match(/^(#{1,3})\s+(.*)$/);

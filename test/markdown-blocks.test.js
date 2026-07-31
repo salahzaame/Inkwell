@@ -23,3 +23,27 @@ test('a lone pipe row without a separator stays a paragraph', () => {
   const blocks = parseBlocks('| not | a table |\njust text');
   assert.deepEqual(blocks.map(b => b.t), ['p']);
 });
+
+test('records the fence info string as the code block language', () => {
+  const [block] = parseBlocks('```mermaid\ngraph TD\n  A --> B\n```');
+  assert.equal(block.t, 'code');
+  assert.equal(block.lang, 'mermaid');
+  assert.equal(block.text, 'graph TD\n  A --> B');
+});
+
+test('lowercases the language and ignores trailing info-string words', () => {
+  assert.equal(parseBlocks('```Mermaid  title=x\nA\n```')[0].lang, 'mermaid');
+});
+
+test('a bare fence has no language', () => {
+  const [block] = parseBlocks('```\nplain text\n```');
+  assert.equal(block.t, 'code');
+  assert.equal(block.lang, null);
+  assert.equal(block.text, 'plain text');
+});
+
+test('a sketch fence is still its own block type, not a language', () => {
+  const [block] = parseBlocks('```sketch sketch-1\n```');
+  assert.equal(block.t, 'sketch');
+  assert.equal(block.id, 'sketch-1');
+});

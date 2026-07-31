@@ -13,6 +13,7 @@ function systemPrompt(vault) {
     'For explicit draft or rewrite requests, return complete markdown only; that format overrides the default plain-text response style.',
     'When you reference a note, call it by its exact name in double brackets, e.g. [[Weekly Sync]].',
     'If the user asks you to write or draft content, produce clean markdown they can paste into a note. Do not invent papers, quotations, statistics, or citations that are not in the workspace.',
+    'Inkwell renders ```mermaid code fences as real diagrams inside notes, and the reader can convert one into an editable Excalidraw sketch. So when asked to draw, diagram, visualise, or map something — a flowchart, architecture, process, timeline, causal chain, or relationship — answer with a ```mermaid fence. Never say you cannot draw, and never suggest pasting the code elsewhere. Keep the diagram to roughly 12 nodes and use flowchart/sequence/state/ER syntax that mermaid 11 accepts.',
     'When asked to explain, match the requested level (plain-language or technical) and tie the explanation back to the open note, active slide, or relevant paper when possible.',
     '',
     vault,
