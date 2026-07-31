@@ -1,7 +1,68 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Inline } from '../markdown.jsx';
+import { describeProposal, looksLikeEditRequest } from '../assistant-edits.js';
 
-export default function AIPanel({ messages, typing, input, onInput, onSend, onWiki, onInsert, onReplace, onSaveAsNote, onRequestRewrite, onCreateLiteratureMap, onCreateEvidenceMatrix, onAddToSlide, slideLabel, hasResearchLibrary, provider, localAi, onClose, noteName }) {
+/** The text a review card shows so the change is legible before it is applied. */
+function proposalBody(proposal) {
+  if (proposal.type === 'rename_note') return proposal.newName;
+  if (proposal.type === 'replace_text') return `− ${proposal.find}\n+ ${proposal.replace}`;
+  return proposal.markdown ?? '';
+}
+
+const STATE_LABEL = { applied: 'Applied', rejected: 'Dismissed', failed: 'Could not apply' };
+const STATE_COLOR = { applied: '#7fd1a3', rejected: 'var(--ink-3)', failed: '#f2b771' };
+
+function ProposalCard({ entry, onApply, onReject }) {
+  const [open, setOpen] = useState(false);
+  const { proposal, state } = entry;
+  const body = proposalBody(proposal);
+  const settled = state !== 'pending';
+
+  return (
+    <div style={{
+      border: '1px solid var(--line-2)', borderRadius: '8px', padding: '8px 10px',
+      background: 'var(--bg-canvas)', opacity: state === 'rejected' ? 0.55 : 1,
+    }}>
+      <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: '8px' }}>
+        <span style={{ fontSize: '11.5px', fontWeight: 700, color: 'var(--ink-1)' }}>{describeProposal(proposal)}</span>
+        {settled && <span style={{ fontSize: '10px', color: STATE_COLOR[state], whiteSpace: 'nowrap' }}>{STATE_LABEL[state]}</span>}
+      </div>
+
+      {body && (
+        <pre style={{
+          margin: '6px 0 0', fontSize: '11px', lineHeight: 1.5, color: 'var(--ink-2)',
+          whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontFamily: 'inherit',
+          maxHeight: open ? 'none' : '52px', overflow: 'hidden',
+        }}>{body}</pre>
+      )}
+      {body.length > 110 && (
+        <button type="button" onClick={() => setOpen(o => !o)}
+          style={{ border: 'none', background: 'transparent', color: 'var(--ink-3)', cursor: 'pointer', padding: '3px 0 0', fontSize: '10.5px' }}>
+          {open ? 'Show less' : 'Show all'}
+        </button>
+      )}
+
+      {state === 'failed' && entry.reason && (
+        <div style={{ fontSize: '10.5px', color: '#f2b771', marginTop: '5px' }}>{entry.reason}</div>
+      )}
+
+      {!settled && (
+        <div style={{ display: 'flex', gap: '10px', marginTop: '7px' }}>
+          <button type="button" onClick={onApply}
+            style={{ border: 'none', background: 'transparent', color: 'var(--acc)', cursor: 'pointer', padding: 0, fontSize: '11px', fontWeight: 700 }}>
+            Apply
+          </button>
+          <button type="button" onClick={onReject}
+            style={{ border: 'none', background: 'transparent', color: 'var(--ink-3)', cursor: 'pointer', padding: 0, fontSize: '11px' }}>
+            Dismiss
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+export default function AIPanel({ messages, typing, input, onInput, onSend, onProposeEdits, onApplyProposal, onApplyAllProposals, onRejectProposal, onWiki, onInsert, onReplace, onSaveAsNote, onRequestRewrite, onCreateLiteratureMap, onCreateEvidenceMatrix, onAddToSlide, slideLabel, hasResearchLibrary, provider, localAi, onClose, noteName }) {
   const scrollRef = useRef(null);
 
   useEffect(() => {
@@ -36,6 +97,34 @@ export default function AIPanel({ messages, typing, input, onInput, onSend, onWi
             : { alignSelf: 'flex-start', maxWidth: '92%', background: 'var(--bg-raise)', color: '#c3c7d1', borderRadius: '10px 10px 10px 3px', padding: '9px 13px', fontSize: '13px', lineHeight: 1.55, whiteSpace: 'pre-wrap', animation: 'fadeUp .2s ease-out' }
           }>
             {m.role === 'a' ? <Inline text={m.text} onWiki={onWiki} /> : m.text}
+
+            {m.role === 'a' && m.proposals?.length > 0 && (
+              <div style={{ marginTop: '9px', display: 'flex', flexDirection: 'column', gap: '7px' }}>
+                <div style={{ fontSize: '10px', letterSpacing: '.07em', textTransform: 'uppercase', color: 'var(--ink-3)' }}>
+                  Proposed changes — nothing is saved until you apply
+                </div>
+                {m.proposals.map(entry => (
+                  <ProposalCard
+                    key={entry.id}
+                    entry={entry}
+                    onApply={() => onApplyProposal?.(i, entry.id)}
+                    onReject={() => onRejectProposal?.(i, entry.id)}
+                  />
+                ))}
+                {m.proposals.filter(p => p.state === 'pending').length > 1 && (
+                  <button type="button" onClick={() => onApplyAllProposals?.(i)}
+                    style={{ alignSelf: 'flex-start', border: 'none', background: 'transparent', color: 'var(--acc)', cursor: 'pointer', padding: 0, fontSize: '11px', fontWeight: 700 }}>
+                    Apply all
+                  </button>
+                )}
+                {m.skipped > 0 && (
+                  <div style={{ fontSize: '10.5px', color: 'var(--ink-3)' }}>
+                    {m.skipped} suggestion{m.skipped === 1 ? '' : 's'} came back malformed and {m.skipped === 1 ? 'was' : 'were'} discarded.
+                  </div>
+                )}
+              </div>
+            )}
+
             {m.role === 'a' && m.canApply && (
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginTop: '9px', paddingTop: '8px', borderTop: '1px solid var(--line-2)' }}>
                 <button type="button" onClick={() => onInsert?.(m.text)} style={{ border: 'none', background: 'transparent', color: 'var(--acc)', cursor: 'pointer', padding: 0, fontSize: '11px', fontWeight: 700 }}>
@@ -86,14 +175,22 @@ export default function AIPanel({ messages, typing, input, onInput, onSend, onWi
             placeholder="Ask your vault…"
             style={{ flex: 1, background: 'transparent', border: 'none', outline: 'none', color: 'var(--ink-1)', fontSize: '13px', minWidth: 0 }}
           />
-          <div className="hv-bright" onClick={() => onSend(input)} style={{ width: '26px', height: '26px', borderRadius: '7px', background: 'var(--acc)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', flexShrink: 0 }}>
+          {onProposeEdits && (
+            <div className="hv-item" onClick={() => onProposeEdits(input)} title="Propose changes to your notes for review"
+              style={{ width: '26px', height: '26px', borderRadius: '7px', border: '1px solid var(--line-2)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', flexShrink: 0 }}>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 013 3L7 19l-4 1 1-4z" /></svg>
+            </div>
+          )}
+          <div className="hv-bright" onClick={() => onSend(input)} title="Ask a question" style={{ width: '26px', height: '26px', borderRadius: '7px', background: 'var(--acc)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', flexShrink: 0 }}>
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#17181c" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="M12 19V5M5 12l7-7 7 7" /></svg>
           </div>
         </div>
         <div style={{ fontSize: '10.5px', color: 'var(--ink-3)', marginTop: '8px', textAlign: 'center' }}>
-          {provider && provider.includes('on-device')
-            ? 'Runs locally — your notes never leave this device'
-            : 'Free model — your notes are sent as context when you ask'}
+          {onProposeEdits && looksLikeEditRequest(input)
+            ? 'That reads like a change — use the pencil to review it before it is saved'
+            : provider && provider.includes('on-device')
+              ? 'Runs locally — your notes never leave this device'
+              : 'Free model — your notes are sent as context when you ask'}
         </div>
       </div>
     </div>

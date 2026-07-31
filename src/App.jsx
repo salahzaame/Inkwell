@@ -2,7 +2,8 @@ import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 import {
   INITIAL_FILES, INITIAL_DOCS, INITIAL_MSGS, buildInitialSketches, legacySketchToScene,
 } from './data.js';
-import { askAssistant, buildVaultContext } from './assistant.js';
+import { askAssistant, buildVaultContext, proposeNoteEdits } from './assistant.js';
+import { EDIT_TOOLS_PROMPT, applyProposal, parseEditProposals } from './assistant-edits.js';
 import { parseBlocks, stripInline, extractWikiNames } from './markdown.jsx';
 import { loadHighlightStore, findHighlight, paperIdOf } from './highlights.js';
 import { normalizeSearchQuery, saveSearchQuery } from './references.js';
@@ -646,6 +647,109 @@ export default function App() {
     }
   };
 
+  /**
+   * Ask the assistant to propose structured note changes. Nothing is written here —
+   * the proposals land in the transcript as review cards and wait for an explicit Apply.
+   */
+  const requestNoteEdits = async (text) => {
+    const request = text.trim();
+    if (!request || aiTyping) return;
+    setAiMessages(m => [...m, { role: 'u', text: request }]);
+    setAiInput('');
+    setAiTyping(true);
+    try {
+      const vault = buildVaultContext(files, docs, activeFile, { references, highlights });
+      const { text: reply, provider } = await proposeNoteEdits({
+        request, vault, editPrompt: EDIT_TOOLS_PROMPT, preferLocal: settings.localAi, settings,
+      });
+      setAiProvider(provider);
+      const { summary, proposals, skipped, ok } = parseEditProposals(reply);
+      if (!ok) {
+        setAiMessages(m => [...m, {
+          role: 'a',
+          text: 'I couldn\'t turn that into a set of reviewable changes. Try naming the note and the change explicitly — for example, "add a Limitations section to Reading log".',
+        }]);
+        return;
+      }
+      setAiMessages(m => [...m, {
+        role: 'a',
+        text: summary || `Proposed ${proposals.length} change${proposals.length === 1 ? '' : 's'}.`,
+        proposals: proposals.map((proposal, i) => ({ id: `${Date.now().toString(36)}-${i}`, proposal, state: 'pending' })),
+        skipped,
+      }]);
+    } catch {
+      setAiMessages(m => [...m, { role: 'a', text: 'I couldn\'t reach a model to draft those changes. Check your connection, or run Ollama locally and enable "Local assistant" in Settings.' }]);
+    } finally {
+      setAiTyping(false);
+    }
+  };
+
+  /** Apply one reviewed proposal against the live vault, then mark its card resolved. */
+  const applyNoteProposal = (messageIndex, proposalId) => {
+    const entry = aiMessages[messageIndex]?.proposals?.find(p => p.id === proposalId);
+    if (!entry || entry.state !== 'pending') return;
+
+    // resolved against current state, so a suggestion the note has outgrown fails
+    // visibly on its card instead of clobbering something else
+    const result = applyProposal(entry.proposal, { files, docs });
+    if (result.applied) {
+      setFiles(result.files);
+      setDocs(result.docs);
+      if (result.openId) {
+        setOpenTabs(t => (t.includes(result.openId) ? t : [...t, result.openId]));
+        setActiveFile(result.openId);
+        setView('editor');
+      }
+    }
+    const patch = result.applied ? { state: 'applied' } : { state: 'failed', reason: result.reason };
+    setAiMessages(msgs => msgs.map((m, i) => (i !== messageIndex ? m : {
+      ...m,
+      proposals: m.proposals.map(p => (p.id === proposalId ? { ...p, ...patch } : p)),
+    })));
+  };
+
+  /**
+   * Apply every pending proposal in one pass. Each change is folded onto the result
+   * of the previous one, so later edits see the text earlier edits produced.
+   */
+  const applyAllNoteProposals = (messageIndex) => {
+    const pending = (aiMessages[messageIndex]?.proposals || []).filter(p => p.state === 'pending');
+    if (!pending.length) return;
+
+    let snapshot = { files, docs };
+    let lastOpened = null;
+    const outcomes = new Map();
+    for (const entry of pending) {
+      const result = applyProposal(entry.proposal, snapshot);
+      if (result.applied) {
+        snapshot = { files: result.files, docs: result.docs };
+        lastOpened = result.openId ?? lastOpened;
+        outcomes.set(entry.id, { state: 'applied' });
+      } else {
+        outcomes.set(entry.id, { state: 'failed', reason: result.reason });
+      }
+    }
+
+    setFiles(snapshot.files);
+    setDocs(snapshot.docs);
+    if (lastOpened) {
+      setOpenTabs(t => (t.includes(lastOpened) ? t : [...t, lastOpened]));
+      setActiveFile(lastOpened);
+      setView('editor');
+    }
+    setAiMessages(msgs => msgs.map((m, i) => (i !== messageIndex ? m : {
+      ...m,
+      proposals: m.proposals.map(p => (outcomes.has(p.id) ? { ...p, ...outcomes.get(p.id) } : p)),
+    })));
+  };
+
+  const rejectNoteProposal = (messageIndex, proposalId) => {
+    setAiMessages(msgs => msgs.map((m, i) => (i !== messageIndex ? m : {
+      ...m,
+      proposals: m.proposals.map(p => (p.id === proposalId ? { ...p, state: 'rejected' } : p)),
+    })));
+  };
+
   /** Assistant drafts remain user-controlled: insert into the current note or save as a separate note. */
   const insertAssistantDraft = (text) => {
     if (!activeNote) return;
@@ -907,6 +1011,7 @@ export default function App() {
           <AIPanel
             messages={aiMessages} typing={aiTyping} input={aiInput}
             onInput={setAiInput} onSend={sendMessage} onWiki={openWiki} provider={aiProvider} localAi={settings.localAi}
+            onProposeEdits={requestNoteEdits} onApplyProposal={applyNoteProposal} onApplyAllProposals={applyAllNoteProposals} onRejectProposal={rejectNoteProposal}
             onInsert={insertAssistantDraft} onReplace={replaceWithAssistantDraft} onSaveAsNote={saveAssistantDraft} onRequestRewrite={requestNoteRewrite} noteName={activeNote?.name}
             onCreateLiteratureMap={createLiteratureMap} onCreateEvidenceMatrix={createEvidenceMatrix} hasResearchLibrary={references.length > 0}
             onAddToSlide={view === 'slides' && activeDeck?.elements?.[selectedDeckSlide]?.type === 'Slide' ? addAssistantToSlide : null}

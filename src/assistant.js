@@ -189,6 +189,22 @@ export async function completeChat({ messages, maxTokens, settings }) {
 }
 
 /**
+ * Ask for structured note edits instead of prose. Returns { text, provider } where
+ * text is the raw JSON payload — parsing and validation happen in assistant-edits.js.
+ */
+export async function proposeNoteEdits({ request, vault, editPrompt, preferLocal, settings }) {
+  const messages = [
+    { role: 'system', content: systemPrompt(vault) + '\n\n' + editPrompt },
+    { role: 'user', content: request },
+  ];
+  let lastErr;
+  for (const ask of providerChain({ preferLocal, settings })) {
+    try { return await ask(messages); } catch (e) { lastErr = e; }
+  }
+  throw lastErr ?? new Error('no assistant provider available');
+}
+
+/**
  * history: [{ role: 'u'|'a', text }] — most recent last.
  * Returns { text, provider, local }; throws only if every provider fails.
  */
