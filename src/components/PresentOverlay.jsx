@@ -1,22 +1,26 @@
+import { useState } from 'react';
 import { Renderer } from '@json-render/react';
 import { monthYear } from '../data.js';
 import SketchSnapshot from './SketchSnapshot.jsx';
-import { deckRegistry, DeckAssets, DeckProviders, deckSlideKeys, slideSpec } from '../deck/registry.jsx';
+import { deckRegistry, DeckAssets, DeckProviders, deckSlideKeys, getDeckTheme, slideSpec } from '../deck/registry.jsx';
 import { SlideBoundary } from './SlidesView.jsx';
 
-export default function PresentOverlay({ template, slideIx, slides, sketches, deck, images, onClose, onPrev, onNext, onGo }) {
-  const light = template === 'light';
-  const ink = light ? '#26221a' : '#e8eaf0';
+export default function PresentOverlay({ template, slideIx, slides, sketches, deck, images, references = [], onClose, onPrev, onNext, onGo }) {
+  const [showNotes, setShowNotes] = useState(false);
+  const deckTheme = getDeckTheme(deck?.elements?.[deck?.root]?.props?.theme || (template === 'light' ? 'paper' : 'midnight'));
+  const light = deck ? deckTheme.light : template === 'light';
+  const ink = deck ? deckTheme.ink : (light ? '#26221a' : '#e8eaf0');
   const slideKeys = deck ? deckSlideKeys(deck) : [];
   const total = deck ? slideKeys.length : slides.length;
   const slide = deck ? null : slides[slideIx];
   const deckSlideKey = deck ? slideKeys[Math.min(slideIx, slideKeys.length - 1)] : null;
+  const speakerNotes = deckSlideKey ? deck.elements[deckSlideKey]?.props?.speakerNotes : null;
 
   return (
     <div style={{
       position: 'fixed', inset: 0, zIndex: 60, display: 'flex', flexDirection: 'column',
       alignItems: 'center', justifyContent: 'center',
-      background: light ? '#f4f1e9' : '#101114', color: ink,
+      background: deck ? deckTheme.background : (light ? '#f4f1e9' : '#101114'), color: ink,
     }}>
       <div className="hv-fade" onClick={onClose} style={{ position: 'absolute', top: '18px', right: '20px', width: '32px', height: '32px', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: 'inherit' }}>
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><path d="M5 5l14 14M19 5L5 19" /></svg>
@@ -24,9 +28,9 @@ export default function PresentOverlay({ template, slideIx, slides, sketches, de
 
       {deck && deckSlideKey && (
         <div key={slideIx} style={{ width: 'min(1180px, 90vw)', animation: 'fadeUp .3s ease-out' }}>
-          <DeckAssets.Provider value={{ sketches, images: images || {}, light }}>
+          <DeckAssets.Provider value={{ sketches, images: images || {}, references, light }}>
             <DeckProviders>
-              <div className={'deck-slide deck-present' + (light ? ' light' : '')} style={{ fontSize: 'min(1.4vw, 2.5vh)', boxShadow: '0 30px 80px rgba(0,0,0,.4)' }}>
+              <div className={'deck-slide deck-present' + (light ? ' light' : '')} style={{ fontSize: 'min(1.4vw, 2.5vh)', background: deckTheme.background, color: deckTheme.ink, borderColor: deckTheme.border, '--acc': deckTheme.accent || 'var(--acc)', boxShadow: '0 30px 80px rgba(0,0,0,.4)' }}>
                 <SlideBoundary>
                   <Renderer spec={slideSpec(deck, deckSlideKey)} registry={deckRegistry} />
                 </SlideBoundary>
@@ -34,6 +38,13 @@ export default function PresentOverlay({ template, slideIx, slides, sketches, de
             </DeckProviders>
           </DeckAssets.Provider>
         </div>
+      )}
+
+      {deck && speakerNotes && showNotes && (
+        <aside style={{ position: 'absolute', left: '24px', bottom: '22px', maxWidth: 'min(440px, 45vw)', padding: '12px 14px', background: light ? 'rgba(38,34,26,.09)' : 'rgba(255,255,255,.08)', border: '1px solid ' + (light ? 'rgba(38,34,26,.18)' : 'rgba(255,255,255,.16)'), borderRadius: '8px', color: ink, fontSize: '13px', lineHeight: 1.45 }}>
+          <div style={{ fontSize: '10px', fontWeight: 700, letterSpacing: '.08em', textTransform: 'uppercase', opacity: .6, marginBottom: '5px' }}>Speaker notes</div>
+          {speakerNotes}
+        </aside>
       )}
 
       {slide && slide.type === 'title' && (
@@ -77,6 +88,11 @@ export default function PresentOverlay({ template, slideIx, slides, sketches, de
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 5l7 7-7 7" /></svg>
         </div>
       </div>
+      {deck && speakerNotes && (
+        <button type="button" onClick={() => setShowNotes(v => !v)} style={{ position: 'absolute', right: '22px', bottom: '21px', border: '1px solid ' + (light ? '#d5cfbf' : '#343841'), background: 'transparent', color: ink, borderRadius: '7px', cursor: 'pointer', padding: '7px 10px', fontSize: '11.5px', fontWeight: 600 }}>
+          {showNotes ? 'Hide notes' : 'Show notes'}
+        </button>
+      )}
     </div>
   );
 }

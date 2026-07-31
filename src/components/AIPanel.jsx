@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { Inline } from '../markdown.jsx';
 
-export default function AIPanel({ messages, typing, input, onInput, onSend, onWiki, provider, localAi, onClose }) {
+export default function AIPanel({ messages, typing, input, onInput, onSend, onWiki, onInsert, onReplace, onSaveAsNote, onRequestRewrite, onCreateLiteratureMap, onCreateEvidenceMatrix, onAddToSlide, slideLabel, hasResearchLibrary, provider, localAi, onClose, noteName }) {
   const scrollRef = useRef(null);
 
   useEffect(() => {
@@ -34,7 +34,29 @@ export default function AIPanel({ messages, typing, input, onInput, onSend, onWi
           <div key={i} style={m.role === 'u'
             ? { alignSelf: 'flex-end', maxWidth: '85%', background: 'color-mix(in oklab, var(--acc) 22%, var(--bg-raise))', color: '#e6e2f7', borderRadius: '10px 10px 3px 10px', padding: '9px 13px', fontSize: '13px', lineHeight: 1.55, whiteSpace: 'pre-wrap', animation: 'fadeUp .2s ease-out' }
             : { alignSelf: 'flex-start', maxWidth: '92%', background: 'var(--bg-raise)', color: '#c3c7d1', borderRadius: '10px 10px 10px 3px', padding: '9px 13px', fontSize: '13px', lineHeight: 1.55, whiteSpace: 'pre-wrap', animation: 'fadeUp .2s ease-out' }
-          }>{m.role === 'a' ? <Inline text={m.text} onWiki={onWiki} /> : m.text}</div>
+          }>
+            {m.role === 'a' ? <Inline text={m.text} onWiki={onWiki} /> : m.text}
+            {m.role === 'a' && m.canApply && (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginTop: '9px', paddingTop: '8px', borderTop: '1px solid var(--line-2)' }}>
+                <button type="button" onClick={() => onInsert?.(m.text)} style={{ border: 'none', background: 'transparent', color: 'var(--acc)', cursor: 'pointer', padding: 0, fontSize: '11px', fontWeight: 700 }}>
+                  Add to {noteName || 'note'}
+                </button>
+                <button type="button" onClick={() => onSaveAsNote?.(m.text)} style={{ border: 'none', background: 'transparent', color: 'var(--ink-2)', cursor: 'pointer', padding: 0, fontSize: '11px' }}>
+                  Save as new note
+                </button>
+                {onAddToSlide && (
+                  <button type="button" onClick={() => onAddToSlide(m.text)} style={{ border: 'none', background: 'transparent', color: '#9edcf7', cursor: 'pointer', padding: 0, fontSize: '11px', fontWeight: 700 }}>
+                    Add to {slideLabel || 'slide'}
+                  </button>
+                )}
+                {m.canReplace && (
+                  <button type="button" onClick={() => onReplace?.(m.text)} style={{ border: 'none', background: 'transparent', color: '#f2b771', cursor: 'pointer', padding: 0, fontSize: '11px', fontWeight: 700 }}>
+                    Replace note
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
         ))}
         {typing && (
           <div style={{ alignSelf: 'flex-start', background: 'var(--bg-raise)', borderRadius: '10px 10px 10px 3px', padding: '10px 14px', display: 'flex', gap: '4px' }}>
@@ -48,6 +70,12 @@ export default function AIPanel({ messages, typing, input, onInput, onSend, onWi
         <div className="hv-chip" onClick={() => onSend('Summarize this note')} style={chip}>Summarize note</div>
         <div className="hv-chip" onClick={() => onSend('What links here?')} style={chip}>What links here?</div>
         <div className="hv-chip" onClick={() => onSend('Draft slides from this note')} style={chip}>Draft slides</div>
+        <div className="hv-chip" onClick={() => onSend('Explain the key idea in this note in plain language')} style={chip}>Explain simply</div>
+        <div className="hv-chip" onClick={() => onSend('Explain the key idea in this note at a technical level')} style={chip}>Explain technically</div>
+        {noteName && <div className="hv-chip" onClick={onRequestRewrite} style={chip}>Rewrite this note</div>}
+        {onAddToSlide && <div className="hv-chip" onClick={() => onSend('Review the selected slide in the active deck. Suggest a sharper, concise addition that improves its narrative, accuracy, or clarity.')} style={{ ...chip, color: '#9edcf7' }}>Improve selected slide</div>}
+        {hasResearchLibrary && <div className="hv-chip" onClick={onCreateLiteratureMap} style={{ ...chip, color: 'var(--acc)' }}>Create research map</div>}
+        {hasResearchLibrary && <div className="hv-chip" onClick={onCreateEvidenceMatrix} style={chip}>Create evidence matrix</div>}
       </div>
       <div style={{ padding: '0 14px 14px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', background: 'var(--bg-canvas)', border: '1px solid var(--line-2)', borderRadius: '10px', padding: '8px 8px 8px 12px' }}>

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { getDocument, GlobalWorkerOptions, TextLayer } from 'pdfjs-dist';
 import { MARKERS, newHighlightId } from '../highlights.js';
+import { buildPdfExcerptPrompt } from '../pdf-prompts.js';
 
 GlobalWorkerOptions.workerSrc = new URL('pdfjs-dist/build/pdf.worker.min.mjs', import.meta.url).toString();
 
@@ -277,6 +278,13 @@ export default function PdfViewer({
     setPending(null);
   };
 
+  const explainSelection = (level) => {
+    if (!pending?.text || !onSendToAi) return;
+    onSendToAi(buildPdfExcerptPrompt({ title, citationKey, text: pending.text, level }));
+    window.getSelection()?.removeAllRanges();
+    setPending(null);
+  };
+
   /* ── clicking an existing highlight ── */
   const onPageClick = (e, pageNum) => {
     const sel = window.getSelection();
@@ -475,6 +483,8 @@ export default function PdfViewer({
               onClick={() => addMarker(name)}
             />
           ))}
+          {onSendToAi && <button className="pop-btn" type="button" onClick={() => explainSelection('simple')}>Explain simply</button>}
+          {onSendToAi && <button className="pop-btn" type="button" onClick={() => explainSelection('technical')}>Explain technically</button>}
         </div>
       )}
 

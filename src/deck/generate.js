@@ -13,8 +13,8 @@ const SYSTEM_PROMPT = `You are the presentation designer inside Inkwell, a resea
 
 OUTPUT FORMAT — JSONL, one RFC 6902 JSON patch per line, NO other text, no code fences:
 {"op":"add","path":"/root","value":"deck"}
-{"op":"add","path":"/elements/deck","value":{"type":"Deck","props":{"title":"..."},"children":["s1","s2"]}}
-{"op":"add","path":"/elements/s1","value":{"type":"Slide","props":{"layout":"title","eyebrow":null},"children":["s1-title"]}}
+{"op":"add","path":"/elements/deck","value":{"type":"Deck","props":{"title":"...","theme":"midnight"},"children":["s1","s2"]}}
+{"op":"add","path":"/elements/s1","value":{"type":"Slide","props":{"layout":"title","eyebrow":null,"speakerNotes":null},"children":["s1-title"]}}
 {"op":"add","path":"/elements/s1-title","value":{"type":"Title","props":{"text":"...","subtitle":"..."},"children":[]}}
 
 COMPONENTS (type — props):
@@ -29,6 +29,7 @@ COMPONENTS (type — props):
 - Columns — {}. Children render side by side (2-3 children).
 - Sketch — {id:string}. Embeds a note sketch. Only ids listed as available.
 - NoteImage — {id:string, caption:string|null}. Embeds a note image. Only ids listed as available.
+- Citation — {citationKey:string, label:string|null}. A compact source attribution. Only use keys listed as available.
 
 DESIGN RULES:
 - 6 to 10 slides. Every element key is a short slug ("s3", "s3-bullets").
@@ -93,12 +94,13 @@ function compileReply(raw) {
  * Generate a deck spec for a note. Throws with a human-readable message on failure.
  * sketchIds / imageIds: assets from the note the model is allowed to embed.
  */
-export async function generateDeckSpec({ noteName, doc, sketchIds = [], imageIds = [], settings }) {
+export async function generateDeckSpec({ noteName, doc, sketchIds = [], imageIds = [], researchReferences = [], settings }) {
   const system = SYSTEM_PROMPT;
 
   const assets = [
     sketchIds.length ? `Available Sketch ids: ${sketchIds.join(', ')}` : 'No sketches available.',
     imageIds.length ? `Available NoteImage ids: ${imageIds.join(', ')}` : 'No images available.',
+    researchReferences.length ? `Available Citation keys: ${researchReferences.slice(0, 20).filter(reference => reference.citationKey).map(reference => `[@${reference.citationKey}] ${reference.title || 'Untitled'} (${reference.year || 'n.d.'})`).join('; ')}` : 'No research citations available.',
   ].join('\n');
 
   const user = [

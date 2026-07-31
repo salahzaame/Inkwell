@@ -2,6 +2,9 @@ import { useEffect, useRef, useState } from 'react';
 import { fmtEdited } from '../data.js';
 import { parseBlocks, Inline, toggleTaskInDoc, extractTags, findMentions } from '../markdown.jsx';
 import { fileToCompressedDataUrl, newImageId } from '../images.js';
+import { BIBLIOGRAPHY_STYLES, generateBibliography } from '../bibliography.js';
+import { wikilinkEditorHtml } from '../wiki-editor.js';
+import { addTableRowToDoc, updateTableCellInDoc } from '../tables.js';
 import SketchCanvas from './SketchCanvas.jsx';
 
 /* ── palettes: warm "paper" page (Inkwell's signature) vs classic dark ── */
@@ -53,7 +56,78 @@ function caretPos(ta) {
 
 const linesOf = (doc) => (doc === '' ? [] : doc.split('\n'));
 
-function RenderedBlock({ b, pal, doc, onDocChange, onWiki, images = {}, onDeleteImage }) {
+function markdownFromRichNode(node) {
+  if (node.nodeType === Node.TEXT_NODE) return node.textContent || '';
+  if (node.nodeType !== Node.ELEMENT_NODE) return '';
+  if (node.dataset?.wiki != null) return `[[${node.dataset.wiki}]]`;
+  if (node.tagName === 'BR') return '\n';
+  const body = [...node.childNodes].map(markdownFromRichNode).join('');
+  return node.tagName === 'DIV' ? `\n${body}` : body;
+}
+
+function FriendlyWikilinkEditor({ value, style, spellCheck, onChange, onBlur, editorRef }) {
+  const ownRef = useRef(null);
+  const ref = editorRef || ownRef;
+  useEffect(() => {
+    if (ref.current && document.activeElement !== ref.current) ref.current.innerHTML = wikilinkEditorHtml(value);
+  }, [value]);
+  return (
+    <div
+      ref={ref}
+      className="blk-rich"
+      contentEditable
+      suppressContentEditableWarning
+      spellCheck={spellCheck}
+      onInput={(event) => onChange([...event.currentTarget.childNodes].map(markdownFromRichNode).join('').replace(/^\n/, ''))}
+      onBlur={onBlur}
+      style={style}
+    />
+  );
+}
+
+function EditableTable({ block, pal, doc, onDocChange, spellCheck }) {
+  const cell = { border: `1px solid ${pal.border}`, padding: '0', textAlign: 'left' };
+  const inputStyle = {
+    boxSizing: 'border-box', width: '100%', minWidth: '86px', border: 'none', outline: 'none',
+    background: 'transparent', color: pal.body, padding: '7px 12px', font: 'inherit', lineHeight: 1.6,
+  };
+  const changeCell = (rowIndex, columnIndex, value) => onDocChange(updateTableCellInDoc(doc, block, rowIndex, columnIndex, value));
+  const renderCell = (value, rowIndex, columnIndex, header = false) => (
+    <input
+      data-table-cell
+      aria-label={`${header ? 'Column heading' : 'Table cell'} ${columnIndex + 1}${header ? '' : `, row ${rowIndex + 1}`}`}
+      value={value ?? ''}
+      spellCheck={spellCheck}
+      onMouseDown={(event) => event.stopPropagation()}
+      onChange={(event) => changeCell(rowIndex, columnIndex, event.target.value)}
+      onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); event.currentTarget.blur(); } }}
+      style={{ ...inputStyle, fontWeight: header ? 600 : 400, color: header ? pal.ink : pal.body }}
+    />
+  );
+  return (
+    <div style={{ overflowX: 'auto', margin: '0 0 22px' }} onMouseDown={(event) => event.stopPropagation()}>
+      <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: '14px', lineHeight: 1.6 }}>
+        <thead>
+          <tr>{block.header.map((value, columnIndex) => <th key={columnIndex} style={{ ...cell, background: pal.card }}>{renderCell(value, -1, columnIndex, true)}</th>)}</tr>
+        </thead>
+        <tbody>
+          {block.rows.map((row, rowIndex) => (
+            <tr key={rowIndex}>{block.header.map((_, columnIndex) => <td key={columnIndex} style={cell}>{renderCell(row[columnIndex], rowIndex, columnIndex)}</td>)}</tr>
+          ))}
+        </tbody>
+      </table>
+      <button
+        data-table-control
+        type="button"
+        onMouseDown={(event) => event.stopPropagation()}
+        onClick={() => onDocChange(addTableRowToDoc(doc, block))}
+        style={{ marginTop: '8px', border: 'none', background: 'transparent', color: pal.muted, padding: '3px 0', cursor: 'pointer', fontSize: '12px' }}
+      >+ Add row</button>
+    </div>
+  );
+}
+
+function RenderedBlock({ b, pal, doc, onDocChange, onWiki, images = {}, onDeleteImage, spellCheck }) {
   const pStyle = { fontSize: '15.5px', lineHeight: 1.75, color: pal.body, margin: '0 0 22px' };
   const toggleTask = (ix) => onDocChange(toggleTaskInDoc(doc, ix));
 
@@ -107,21 +181,7 @@ function RenderedBlock({ b, pal, doc, onDocChange, onWiki, images = {}, onDelete
     );
   }
   if (b.t === 'table') {
-    const cell = { border: `1px solid ${pal.border}`, padding: '7px 12px', textAlign: 'left' };
-    return (
-      <div style={{ overflowX: 'auto', margin: '0 0 22px' }}>
-        <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: '14px', lineHeight: 1.6 }}>
-          <thead>
-            <tr>{b.header.map((c, j) => <th key={j} style={{ ...cell, background: pal.card, fontWeight: 600, color: pal.ink }}><Inline text={c} onWiki={onWiki} /></th>)}</tr>
-          </thead>
-          <tbody>
-            {b.rows.map((r, k) => (
-              <tr key={k}>{b.header.map((_, j) => <td key={j} style={{ ...cell, color: pal.body }}><Inline text={r[j] ?? ''} onWiki={onWiki} /></td>)}</tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    );
+    return <EditableTable block={b} pal={pal} doc={doc} onDocChange={onDocChange} spellCheck={spellCheck} />;
   }
   if (b.t === 'list') {
     return (
@@ -156,44 +216,6 @@ function RenderedBlock({ b, pal, doc, onDocChange, onWiki, images = {}, onDelete
   return null;
 }
 
-function generateBibliography(docText, references) {
-  const regex = /\[@([a-zA-Z0-9_-]+)\]/g;
-  const citationKeys = new Set();
-  let match;
-  while ((match = regex.exec(docText)) !== null) {
-    citationKeys.add(match[1]);
-  }
-  
-  if (citationKeys.size === 0) {
-    alert("No citations (e.g. [@citekey]) found in this note. Write citations first!");
-    return docText;
-  }
-  
-  const formattedRefs = [];
-  for (const key of citationKeys) {
-    const ref = references.find(r => r.citationKey === key);
-    if (ref) {
-      const authorStr = ref.authors && ref.authors.length > 0
-        ? (ref.authors.length > 1 
-            ? ref.authors.slice(0, -1).join(', ') + ' & ' + ref.authors[ref.authors.length - 1] 
-            : ref.authors[0])
-        : 'Unknown Author';
-      const yearStr = ref.year ? ` (${ref.year})` : ' (n.d.)';
-      const titleStr = ref.title ? ` *${ref.title.trim()}*` : '';
-      const journalStr = ref.journal ? `, ${ref.journal.trim()}` : '';
-      const urlStr = ref.url ? ` [Source](${ref.url})` : '';
-      formattedRefs.push(`- **${key}**: ${authorStr}${yearStr}.${titleStr}${journalStr}.${urlStr}`);
-    } else {
-      formattedRefs.push(`- **${key}**: Reference details not found in vault.`);
-    }
-  }
-  
-  const parts = docText.split(/\n## References/i);
-  const cleanDoc = parts[0].trim();
-  const bibContent = `\n\n## References\n\n` + formattedRefs.join('\n') + '\n';
-  return cleanDoc + bibContent;
-}
-
 export default function Editor({
   note, crumb, doc, files, docs,
   onDocChange, onWiki, onOpen, onRename, onDelete, onInsertSketch, onCreateSketch, onNewNote,
@@ -203,6 +225,7 @@ export default function Editor({
   references = [],
 }) {
   const taRef = useRef(null);
+  const richRef = useRef(null);
   const imageInputRef = useRef(null);   // hidden file picker for image inserts
   const caretRef = useRef(null);        // caret to apply after (re)focus: number | 'end'
   const draftCaretRef = useRef(null);   // caret to apply after in-draft edits
@@ -213,6 +236,7 @@ export default function Editor({
   const [selIx, setSelIx] = useState(0);
   const [citeMenu, setCiteMenu] = useState(null);
   const [citeIx, setCiteIx] = useState(0);
+  const [bibliographyStyle, setBibliographyStyle] = useState('apa');
 
   const pal = paper ? PAL.paper : PAL.dark;
   const blocks = parseBlocks(doc);
@@ -276,7 +300,13 @@ export default function Editor({
   // apply caret + autosize whenever the active textarea (re)renders
   useEffect(() => {
     const ta = taRef.current;
-    if (!ta) return;
+    if (!ta) {
+      if (richRef.current && caretRef.current != null) {
+        richRef.current.focus();
+        caretRef.current = null;
+      }
+      return;
+    }
     ta.style.height = 'auto';
     ta.style.height = ta.scrollHeight + 'px';
     if (caretRef.current != null) {
@@ -558,7 +588,12 @@ export default function Editor({
 
   const handleGenBibliography = () => {
     const currentText = focus ? draft : doc;
-    const newText = generateBibliography(currentText, references);
+    const result = generateBibliography(currentText, references, bibliographyStyle);
+    if (!result.cited) {
+      alert('No citations (for example [@citekey]) were found in this note. Add citations first.');
+      return;
+    }
+    const newText = result.text;
     if (newText !== currentText) {
       if (focus) {
         setDraft(newText);
@@ -682,7 +717,18 @@ export default function Editor({
 
   const editorNode = (b) => (
     <div key="editor" style={{ position: 'relative' }}>
-      <textarea
+      {b?.t === 'p' && /\[\[[^\]]+\]\]/.test(draft) ? (
+        <FriendlyWikilinkEditor
+          value={draft}
+          style={editStyleFor(b)}
+          spellCheck={spell}
+          editorRef={richRef}
+          onChange={setDraft}
+          onBlur={() => setTimeout(() => {
+            if (document.activeElement !== richRef.current) commitBlur();
+          }, 90)}
+        />
+      ) : <textarea
         ref={taRef}
         className="blk-ta"
         rows={1}
@@ -704,7 +750,7 @@ export default function Editor({
           if (ae !== taRef.current && !(ae && ae.closest && (ae.closest('.slash-menu') || ae.closest('.cite-menu')))) commitBlur();
         }, 90)}
         style={editStyleFor(b)}
-      />
+      />}
       {slash && filtered.length > 0 && (
         <div className="slash-menu" style={{
           position: 'absolute', top: slash.y + 'px', left: `min(${slash.x}px, calc(100% - 250px))`,
@@ -790,13 +836,13 @@ export default function Editor({
       <div
         key={b.t + '-' + b.line0}
         onMouseDown={(e) => {
-          if (e.target.closest('a, [data-cb]')) return;
+          if (e.target.closest('a, [data-cb], [data-table-cell], [data-table-control]')) return;
           e.preventDefault();
           navTo(b, 'end');
         }}
         style={{ cursor: 'text' }}
       >
-        <RenderedBlock b={b} pal={pal} doc={doc} onDocChange={onDocChange} onWiki={onWiki} images={images} onDeleteImage={deleteImageBlock} />
+        <RenderedBlock b={b} pal={pal} doc={doc} onDocChange={onDocChange} onWiki={onWiki} images={images} onDeleteImage={deleteImageBlock} spellCheck={spell} />
       </div>,
     );
   });
@@ -838,7 +884,13 @@ export default function Editor({
               {crumb} <span style={{ margin: '0 4px' }}>/</span> <span style={{ color: pal.muted }}>{note.name}</span>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '2px' }} onMouseDown={(e) => e.preventDefault()}>
-              <div className={toolCls} title="Generate Bibliography" onClick={handleGenBibliography} style={iconBtn}>
+              <label title="Bibliography style" onMouseDown={(e) => e.stopPropagation()} style={{ display: 'flex', alignItems: 'center', height: '26px', marginRight: '2px', border: `1px solid ${pal.border}`, borderRadius: '6px', padding: '0 5px', background: paper ? 'rgba(255,253,247,.72)' : 'rgba(255,255,255,.025)' }}>
+                <span style={{ color: pal.faint, fontSize: '9px', fontWeight: 700, letterSpacing: '.05em', marginRight: '3px' }}>CITE</span>
+                <select aria-label="Bibliography style" value={bibliographyStyle} onChange={(e) => setBibliographyStyle(e.target.value)} style={{ appearance: 'none', border: 'none', outline: 'none', background: 'transparent', color: pal.muted, cursor: 'pointer', font: '600 10px ui-monospace, SFMono-Regular, Menlo, monospace', padding: 0 }}>
+                  {Object.entries(BIBLIOGRAPHY_STYLES).map(([id, style]) => <option key={id} value={id}>{style.label}</option>)}
+                </select>
+              </label>
+              <div className={toolCls} title={`Generate ${BIBLIOGRAPHY_STYLES[bibliographyStyle].label} bibliography`} onClick={handleGenBibliography} style={iconBtn}>
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M4 6h16M4 10h16M4 14h16M4 18h16" />
                 </svg>

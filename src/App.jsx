@@ -1,26 +1,38 @@
-import { useEffect, useMemo, useState } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 import {
   INITIAL_FILES, INITIAL_DOCS, INITIAL_MSGS, buildInitialSketches, legacySketchToScene,
 } from './data.js';
 import { askAssistant, buildVaultContext } from './assistant.js';
 import { parseBlocks, stripInline, extractWikiNames } from './markdown.jsx';
 import { loadHighlightStore, findHighlight, paperIdOf } from './highlights.js';
+import { normalizeSearchQuery, saveSearchQuery } from './references.js';
+import { buildEvidenceMatrix, buildLiteratureMap } from './research-artifacts.js';
 import { generateDeckSpec } from './deck/generate.js';
 import { deckSlideKeys } from './deck/registry.jsx';
+import { deckFromOutlineSlides } from './deck/from-outline.js';
+import { fileToCompressedDataUrl, newImageId } from './images.js';
+import { moveVaultItem, uniqueVaultName } from './vault.js';
 import IconRail from './components/IconRail.jsx';
 import Sidebar from './components/Sidebar.jsx';
 import TabBar from './components/TabBar.jsx';
 import Editor from './components/Editor.jsx';
-import GraphView from './components/GraphView.jsx';
-import SlidesView from './components/SlidesView.jsx';
-import PresentOverlay from './components/PresentOverlay.jsx';
 import AIPanel from './components/AIPanel.jsx';
 import QuickSwitcher from './components/QuickSwitcher.jsx';
 import SettingsModal from './components/SettingsModal.jsx';
 import StatusBar from './components/StatusBar.jsx';
-import ResearchPanel from './components/ResearchPanel.jsx';
-import PdfViewer from './components/PdfViewer.jsx';
 import WorkspaceSplit from './components/WorkspaceSplit.jsx';
+
+// These packages pull in PDF.js, Cytoscape, Excalidraw rendering, and the deck runtime.
+// Keep the core note workspace responsive; each capability loads only when opened.
+const GraphView = lazy(() => import('./components/GraphView.jsx'));
+const SlidesView = lazy(() => import('./components/SlidesView.jsx'));
+const PresentOverlay = lazy(() => import('./components/PresentOverlay.jsx'));
+const ResearchPanel = lazy(() => import('./components/ResearchPanel.jsx'));
+const PdfViewer = lazy(() => import('./components/PdfViewer.jsx'));
+
+function FeatureLoading({ label = 'Opening workspace…' }) {
+  return <div style={{ flex: 1, display: 'grid', placeItems: 'center', color: 'var(--ink-3)', fontSize: '13px' }}>{label}</div>;
+}
 
 const saved = (() => {
   try {
@@ -87,7 +99,9 @@ export default function App() {
   const [importNote, setImportNote] = useState(false);
   const [present, setPresent] = useState(false);
   const [slideIx, setSlideIx] = useState(0);
+  const [selectedDeckSlide, setSelectedDeckSlide] = useState(null);
   const [decks, setDecks] = useState(saved.decks ?? {}); // AI deck spec per note id
+  const [graphPositions, setGraphPositions] = useState(saved.graphPositions ?? {});
   const [deckBusy, setDeckBusy] = useState(false);
 
   const [aiMessages, setAiMessages] = useState(INITIAL_MSGS);
@@ -121,10 +135,22 @@ export default function App() {
       return [];
     }
   });
+  const [savedSearches, setSavedSearches] = useState(() => {
+    try {
+      const searches = JSON.parse(localStorage.getItem('inkwell:saved-searches'));
+      return Array.isArray(searches) ? searches.map(normalizeSearchQuery).filter(Boolean).slice(0, 16) : [];
+    } catch {
+      return [];
+    }
+  });
 
   useEffect(() => {
     localStorage.setItem('inkwell:references', JSON.stringify(references));
   }, [references]);
+
+  useEffect(() => {
+    localStorage.setItem('inkwell:saved-searches', JSON.stringify(savedSearches));
+  }, [savedSearches]);
 
   useEffect(() => {
     localStorage.setItem('inkwell:highlights', JSON.stringify(highlights));
@@ -140,12 +166,12 @@ export default function App() {
 
   /** Save a paper to the library (reading queue) and give it a literature note.
       Returns the lit note's id so callers can bind to it without waiting on state. */
-  const importReference = (ref) => {
+  const importReference = (ref, { open = true } = {}) => {
     const pid = paperIdOf(ref);
     const existing = references.find(r => paperIdOf(r) === pid);
     if (existing) {
       // already in the library — just surface its note
-      if (existing.noteId && files.some(f => f.id === existing.noteId)) {
+      if (open && existing.noteId && files.some(f => f.id === existing.noteId)) {
         setOpenTabs(t => (t.includes(existing.noteId) ? t : [...t, existing.noteId]));
         setActiveFile(existing.noteId);
         setView('editor');
@@ -175,10 +201,16 @@ export default function App() {
     setPaperNotes(m => ({ ...m, [pid]: noteId }));
     setFiles(fs => [...fs, { id: noteId, name: noteName, top: true, mtime: Date.now() }]);
     setDocs(docsMap => ({ ...docsMap, [noteId]: docContent }));
-    setOpenTabs(t => [...t, noteId]);
-    setActiveFile(noteId);
-    setView('editor');
+    if (open) {
+      setOpenTabs(t => [...t, noteId]);
+      setActiveFile(noteId);
+      setView('editor');
+    }
     return noteId;
+  };
+
+  const importReferenceBatch = (items) => {
+    for (const item of items) importReference(item, { open: false });
   };
 
   /** Open a paper in the reader; queue status moves to "reading". Papers straight
@@ -226,6 +258,29 @@ export default function App() {
   const setPaperStatus = (pid, status) => {
     setReferences(rs => rs.map(r => (paperIdOf(r) === pid ? { ...r, status } : r)));
   };
+
+  const setPaperTags = (pid, tags) => {
+    setReferences(rs => rs.map(r => (paperIdOf(r) === pid ? { ...r, tags } : r)));
+  };
+
+  /** Create a grounded, editable research artifact from records already in the vault. */
+  const createResearchArtifact = (kind) => {
+    if (!references.length) return;
+    const dateLabel = new Date().toLocaleDateString();
+    const artifact = kind === 'matrix'
+      ? buildEvidenceMatrix({ references, highlights, dateLabel })
+      : buildLiteratureMap({ references, highlights, dateLabel });
+    const id = `${kind === 'matrix' ? 'evidence-matrix' : 'literature-map'}-${Date.now()}`;
+    setFiles(fs => [...fs, { id, name: artifact.name, top: true, mtime: Date.now() }]);
+    setDocs(d => ({ ...d, [id]: artifact.content }));
+    setOpenTabs(t => (t.includes(id) ? t : [...t, id]));
+    setActiveFile(id);
+    setResearchOpen(false);
+    setView('editor');
+  };
+
+  const createLiteratureMap = () => createResearchArtifact('map');
+  const createEvidenceMatrix = () => createResearchArtifact('matrix');
 
   /** Find (or create) the literature note for a paper; returns its id. */
   const ensurePaperNote = (paper) => {
@@ -317,11 +372,11 @@ export default function App() {
   useEffect(() => {
     const t = setTimeout(() => {
       try {
-        localStorage.setItem('inkwell:v3', JSON.stringify({ files, docs, sketches, images, decks, settings, theme }));
+        localStorage.setItem('inkwell:v3', JSON.stringify({ files, docs, sketches, images, decks, graphPositions, settings, theme }));
       } catch { /* storage unavailable — the vault just won't persist */ }
     }, 250);
     return () => clearTimeout(t);
-  }, [files, docs, sketches, images, decks, settings, theme]);
+  }, [files, docs, sketches, images, decks, graphPositions, settings, theme]);
 
   const activeNote = files.find(f => f.id === activeFile && !f.folder) || null;
   const activeDoc = activeNote ? (docs[activeNote.id] ?? '') : '';
@@ -335,6 +390,15 @@ export default function App() {
   const activeDeck = (activeNote && decks[activeNote.id]) || null;
   const slideCount = activeDeck ? deckSlideKeys(activeDeck).length : slides.length;
 
+  /** Make the locally derived heading outline editable without invoking an AI provider. */
+  const editOutlineDeck = () => {
+    if (!activeNote || activeDeck) return;
+    const theme = slideTemplate === 'light' ? 'paper' : 'midnight';
+    const spec = deckFromOutlineSlides(slides, { title: activeNote.name, theme });
+    setDecks(d => ({ ...d, [activeNote.id]: spec }));
+    setSlideIx(0);
+  };
+
   /** Ask the assistant to design a json-render deck from the open note. */
   const generateDeck = async () => {
     if (!activeNote || deckBusy) return;
@@ -346,6 +410,7 @@ export default function App() {
         doc: activeDoc,
         sketchIds: noteBlocks.filter(b => b.t === 'sketch').map(b => b.id),
         imageIds: noteBlocks.filter(b => b.t === 'image' && b.src.startsWith('img:')).map(b => b.src.slice(4)),
+        researchReferences: references,
         settings,
       });
       setDecks(d => ({ ...d, [activeNote.id]: spec }));
@@ -360,6 +425,16 @@ export default function App() {
   const clearDeck = () => {
     if (!activeNote) return;
     setDecks(d => { const out = { ...d }; delete out[activeNote.id]; return out; });
+    setSlideIx(0);
+  };
+
+  /** Build an editable deck from a local PPTX outline; the source file never leaves this browser. */
+  const importDeck = async (file) => {
+    if (!activeNote) throw new Error('Open a note before importing a presentation.');
+    const theme = slideTemplate === 'light' ? 'paper' : 'midnight';
+    const { importPptxDeck } = await import('./deck/import-pptx.js');
+    const spec = await importPptxDeck(file, { theme });
+    setDecks(d => ({ ...d, [activeNote.id]: spec }));
     setSlideIx(0);
   };
 
@@ -412,6 +487,7 @@ export default function App() {
     const id = 'n' + Date.now();
     setFiles(fs => [...fs, { id, name, top: true, mtime: Date.now() }]);
     setDocs(d => ({ ...d, [id]: '' }));
+    if (parent) setCollapsed(current => ({ ...current, [parent]: false }));
     setActiveFile(id);
     setView('editor');
     setOpenTabs(t => [...t, id]);
@@ -430,16 +506,29 @@ export default function App() {
     });
   };
 
-  const newNote = () => {
+  const newNote = (parent = null) => {
     const id = 'n' + Date.now();
-    const base = 'Untitled';
-    let name = base;
-    for (let n = 2; files.some(f => f.name === name); n++) name = `${base} ${n}`;
-    setFiles(f => [...f, { id, name, top: true, mtime: Date.now() }]);
+    const name = uniqueVaultName(files, 'Untitled', parent);
+    setFiles(f => [...f, { id, name, parent: parent || undefined, top: !parent, mtime: Date.now() }]);
     setDocs(d => ({ ...d, [id]: '' }));
     setOpenTabs(t => [...t, id]);
     setActiveFile(id);
     setView('editor');
+  };
+
+  const createVaultFolder = (name, parent = null, kind = 'folder') => {
+    const id = `${kind}-${Date.now().toString(36)}`;
+    const clean = uniqueVaultName(files, name || (kind === 'project' ? 'New project' : 'New folder'), parent);
+    setFiles(current => [...current, { id, name: clean, folder: true, kind, parent: parent || undefined, top: !parent, mtime: Date.now() }]);
+    setCollapsed(current => ({ ...current, [id]: false, ...(parent ? { [parent]: false } : {}) }));
+    return id;
+  };
+
+  const moveNoteToFolder = (noteId, parent) => {
+    if (!noteId || !files.some(file => file.id === noteId && !file.folder)) return;
+    if (parent && !files.some(file => file.id === parent && file.folder)) return;
+    setFiles(current => moveVaultItem(current, noteId, parent));
+    if (parent) setCollapsed(current => ({ ...current, [parent]: false }));
   };
 
   /** Rename a note and rewrite [[wikilinks]] pointing at it across the vault. */
@@ -525,7 +614,16 @@ export default function App() {
     });
   };
 
-  const sendMessage = async (text) => {
+  /** Store an image in the local vault so the slide studio can embed it directly. */
+  const importSlideImage = async (file) => {
+    if (!file?.type?.startsWith('image/')) throw new Error('Choose an image file to add it to this slide.');
+    const id = newImageId();
+    const data = await fileToCompressedDataUrl(file);
+    setImageData(id, data);
+    return id;
+  };
+
+  const sendMessage = async (text, { canReplace = false } = {}) => {
     const t = text.trim();
     if (!t || aiTyping) return;
     const history = [...aiMessages, { role: 'u', text: t }];
@@ -533,10 +631,11 @@ export default function App() {
     setAiInput('');
     setAiTyping(true);
     try {
-      const vault = buildVaultContext(files, docs, activeFile);
+      const selectedSlide = activeDeck?.elements?.[selectedDeckSlide]?.type === 'Slide' ? selectedDeckSlide : null;
+      const vault = buildVaultContext(files, docs, activeFile, { references, highlights, deck: activeDeck, selectedSlide });
       const { text: reply, provider } = await askAssistant({ history, vault, preferLocal: settings.localAi, settings });
       setAiProvider(provider);
-      setAiMessages(m => [...m, { role: 'a', text: reply }]);
+      setAiMessages(m => [...m, { role: 'a', text: reply, canApply: true, canReplace }]);
     } catch {
       setAiMessages(m => [...m, {
         role: 'a',
@@ -546,6 +645,74 @@ export default function App() {
       setAiTyping(false);
     }
   };
+
+  /** Assistant drafts remain user-controlled: insert into the current note or save as a separate note. */
+  const insertAssistantDraft = (text) => {
+    if (!activeNote) return;
+    const heading = activeDoc.trim() ? '\n\n## Assistant draft\n\n' : '# Assistant draft\n\n';
+    updateDoc(activeNote.id, activeDoc.replace(/\s*$/, '') + heading + text.trim() + '\n');
+  };
+
+  const requestNoteRewrite = () => {
+    if (!activeNote) return;
+    sendMessage(
+      'Rewrite the open note as a complete, clearer research document. Preserve factual claims and citations from the source, improve its structure, and return only the replacement markdown with no introduction or commentary.',
+      { canReplace: true },
+    );
+  };
+
+  const replaceWithAssistantDraft = (text) => {
+    if (!activeNote || !text.trim()) return;
+    if (!window.confirm(`Replace the complete contents of "${activeNote.name}" with this assistant draft? You can export your vault first if you need a backup.`)) return;
+    updateDoc(activeNote.id, text.trim() + '\n');
+  };
+
+  const saveAssistantDraft = (text) => {
+    const id = 'ai-' + Date.now();
+    const name = `AI draft ${new Date().toLocaleDateString()}`;
+    setFiles(fs => [...fs, { id, name, top: true, mtime: Date.now() }]);
+    setDocs(d => ({ ...d, [id]: `# ${name}\n\n${text.trim()}\n` }));
+    setOpenTabs(t => (t.includes(id) ? t : [...t, id]));
+    setActiveFile(id);
+    setView('editor');
+  };
+
+  const updateDeck = (updater) => {
+    if (!activeNote) return;
+    setDecks(all => {
+      const current = all[activeNote.id];
+      if (!current) return all;
+      const next = typeof updater === 'function' ? updater(current) : updater;
+      return { ...all, [activeNote.id]: next };
+    });
+  };
+
+  /** Add an assistant response as an ordinary editable Text block on the selected slide. */
+  const addAssistantToSlide = (text) => {
+    if (!activeNote || !activeDeck || !selectedDeckSlide || activeDeck.elements?.[selectedDeckSlide]?.type !== 'Slide') return;
+    const clean = String(text || '').trim().slice(0, 1800);
+    if (!clean) return;
+    const key = `assistant-text-${Date.now().toString(36)}`;
+    setDecks(all => {
+      const current = all[activeNote.id];
+      const slide = current?.elements?.[selectedDeckSlide];
+      if (!slide || slide.type !== 'Slide') return all;
+      return {
+        ...all,
+        [activeNote.id]: {
+          ...current,
+          elements: {
+            ...current.elements,
+            [key]: { type: 'Text', props: { text: clean, dim: null }, children: [] },
+            [selectedDeckSlide]: { ...slide, children: [...(slide.children || []), key] },
+          },
+        },
+      };
+    });
+  };
+
+  const saveResearchSearch = (search) => setSavedSearches(current => saveSearchQuery(current, search));
+  const removeResearchSearch = (search) => setSavedSearches(current => current.filter(item => item !== search));
 
   const rail = {
     files: view === 'editor' && sidebarOpen,
@@ -578,27 +745,29 @@ export default function App() {
   );
 
   const pdfPanel = activePdf && (
-    <PdfViewer
-      pdfUrl={activePdf.url}
-      pdfUrls={activePdf.urls}
-      landingUrl={activePdf.landing}
-      localData={activePdf.localData}
-      title={activePdf.title}
-      citationKey={activePdf.citationKey}
-      highlights={highlights[activePdf.paperId] || []}
-      onAddHighlight={addHighlight}
-      onRemoveHighlight={removeHighlight}
-      jumpHl={jumpHl}
-      onJumpDone={() => setJumpHl(null)}
-      layout={workspaceLayout}
-      onLayoutChange={setWorkspaceLayout}
-      onSendToAi={(text) => {
-        setAiOpen(true);
-        sendMessage(text);
-      }}
-      onClose={() => { setActivePdf(null); setJumpHl(null); }}
-      onLocalFile={openLocalPdf}
-    />
+    <Suspense fallback={<FeatureLoading label="Opening paper reader…" />}>
+      <PdfViewer
+        pdfUrl={activePdf.url}
+        pdfUrls={activePdf.urls}
+        landingUrl={activePdf.landing}
+        localData={activePdf.localData}
+        title={activePdf.title}
+        citationKey={activePdf.citationKey}
+        highlights={highlights[activePdf.paperId] || []}
+        onAddHighlight={addHighlight}
+        onRemoveHighlight={removeHighlight}
+        jumpHl={jumpHl}
+        onJumpDone={() => setJumpHl(null)}
+        layout={workspaceLayout}
+        onLayoutChange={setWorkspaceLayout}
+        onSendToAi={(text) => {
+          setAiOpen(true);
+          sendMessage(text);
+        }}
+        onClose={() => { setActivePdf(null); setJumpHl(null); }}
+        onLocalFile={openLocalPdf}
+      />
+    </Suspense>
   );
 
   return (
@@ -638,12 +807,17 @@ export default function App() {
         )}
 
         {!focusMode && researchOpen && (
-          <ResearchPanel
+          <Suspense fallback={<FeatureLoading label="Opening research library…" />}><ResearchPanel
             references={references}
             highlights={highlights}
+            savedSearches={savedSearches}
             onImportReference={importReference}
+            onImportBibtex={importReferenceBatch}
+            onSaveSearch={saveResearchSearch}
+            onRemoveSavedSearch={removeResearchSearch}
             onOpenPaper={openPaper}
             onSetStatus={setPaperStatus}
+            onSetTags={setPaperTags}
             onOpenNote={(ref) => {
               const noteId = ensurePaperNote({ paperId: paperIdOf(ref), title: ref.title, citationKey: ref.citationKey });
               setOpenTabs(t => (t.includes(noteId) ? t : [...t, noteId]));
@@ -651,12 +825,15 @@ export default function App() {
               setView('editor');
             }}
             onLocalPdf={openLocalPdf}
+            onCreateSynthesis={createLiteratureMap}
+            onCreateEvidenceMatrix={createEvidenceMatrix}
+            onAskAssistant={(prompt) => { setAiOpen(true); setResearchOpen(false); sendMessage(prompt); }}
             onClose={() => setResearchOpen(false)}
-          />
+          /></Suspense>
         )}
 
         {!focusMode && view === 'editor' && sidebarOpen && (
-          <Sidebar files={files} activeFile={activeFile} collapsed={collapsed} onOpen={openFile} onNewNote={newNote} onDelete={deleteNote} />
+          <Sidebar files={files} activeFile={activeFile} collapsed={collapsed} onOpen={openFile} onNewNote={newNote} onNewProject={(name) => createVaultFolder(name, null, 'project')} onNewFolder={(name, parent) => createVaultFolder(name, parent, 'folder')} onMoveNote={moveNoteToFolder} onDelete={deleteNote} />
         )}
 
         <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', background: '#1e2025', position: 'relative' }}>
@@ -706,17 +883,20 @@ export default function App() {
             )}
             {view === 'editor' && pdfHere && workspaceLayout === 'pdf' && <div className="workspace-single-panel">{pdfPanel}</div>}
             {view === 'editor' && pdfHere && workspaceLayout === 'editor' && editorPanel()}
-            {view === 'graph' && <GraphView files={files} docs={docs} onOpen={openFile} />}
+            {view === 'graph' && <Suspense fallback={<FeatureLoading label="Building knowledge graph…" />}><GraphView files={files} docs={docs} onOpen={openFile} positions={graphPositions} onPositionsChange={setGraphPositions} onResetPositions={() => setGraphPositions({})} /></Suspense>}
             {view === 'slides' && (
-              <SlidesView
+              <Suspense fallback={<FeatureLoading label="Opening slide studio…" />}><SlidesView
                 noteName={activeNote ? activeNote.name : 'No note'}
                 slides={slides}
                 template={slideTemplate} importNote={importNote} sketches={sketches}
-                deck={activeDeck} deckBusy={deckBusy} images={images}
-                onGenerateDeck={generateDeck} onClearDeck={clearDeck}
+                deck={activeDeck} deckBusy={deckBusy} images={images} references={references}
+                onGenerateDeck={generateDeck} onClearDeck={clearDeck} onUpdateDeck={updateDeck} onImportDeck={importDeck}
+                onEditOutline={editOutlineDeck}
+                onImportSlideImage={importSlideImage}
                 onTemplate={(t) => { setSlideTemplate(t); setImportNote(t === 'import'); }}
                 onPresent={() => { setPresent(true); setSlideIx(0); }}
-              />
+                onSelectSlide={setSelectedDeckSlide}
+              /></Suspense>
             )}
           </div>
 
@@ -727,6 +907,10 @@ export default function App() {
           <AIPanel
             messages={aiMessages} typing={aiTyping} input={aiInput}
             onInput={setAiInput} onSend={sendMessage} onWiki={openWiki} provider={aiProvider} localAi={settings.localAi}
+            onInsert={insertAssistantDraft} onReplace={replaceWithAssistantDraft} onSaveAsNote={saveAssistantDraft} onRequestRewrite={requestNoteRewrite} noteName={activeNote?.name}
+            onCreateLiteratureMap={createLiteratureMap} onCreateEvidenceMatrix={createEvidenceMatrix} hasResearchLibrary={references.length > 0}
+            onAddToSlide={view === 'slides' && activeDeck?.elements?.[selectedDeckSlide]?.type === 'Slide' ? addAssistantToSlide : null}
+            slideLabel={activeDeck?.elements?.[selectedDeckSlide]?.type === 'Slide' ? `slide ${Math.max(1, deckSlideKeys(activeDeck).indexOf(selectedDeckSlide) + 1)}` : null}
             onClose={() => setAiOpen(false)}
           />
         )}
@@ -743,14 +927,14 @@ export default function App() {
         />
       )}
       {present && slideCount > 0 && (
-        <PresentOverlay
+        <Suspense fallback={null}><PresentOverlay
           template={slideTemplate} slideIx={Math.min(slideIx, slideCount - 1)} slides={slides} sketches={sketches}
-          deck={activeDeck} images={images}
+          deck={activeDeck} images={images} references={references}
           onClose={() => setPresent(false)}
           onPrev={() => setSlideIx(i => Math.max(0, i - 1))}
           onNext={() => setSlideIx(i => Math.min(slideCount - 1, i + 1))}
           onGo={setSlideIx}
-        />
+        /></Suspense>
       )}
     </div>
   );

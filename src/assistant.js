@@ -7,17 +7,46 @@ const OLLAMA = 'http://localhost:11434';
 function systemPrompt(vault) {
   return [
     "You are the assistant built into Inkwell, a local-first markdown note-taking app with embedded Excalidraw sketches.",
+    'You are a research collaborator, not a generic chatbot. Use the workspace below: notes, literature records, reading status, highlights, and any active presentation deck.',
     'Answer questions about the user\'s vault using the notes below. Be concise (1-4 sentences unless asked for more), plain text only — no markdown headings.',
     'The section marked OPEN NOTE is the note the user is looking at right now — when they say "this note", that is the one they mean. Never ask which note; use the open one.',
+    'For explicit draft or rewrite requests, return complete markdown only; that format overrides the default plain-text response style.',
     'When you reference a note, call it by its exact name in double brackets, e.g. [[Weekly Sync]].',
-    'If the user asks you to write or draft content, produce markdown they can paste into a note.',
+    'If the user asks you to write or draft content, produce clean markdown they can paste into a note. Do not invent papers, quotations, statistics, or citations that are not in the workspace.',
+    'When asked to explain, match the requested level (plain-language or technical) and tie the explanation back to the open note, active slide, or relevant paper when possible.',
     '',
     vault,
   ].join('\n');
 }
 
 /** Compact plain-text dump of the vault: active note in full, others truncated. */
-export function buildVaultContext(files, docs, activeId) {
+function deckDescendants(deck, key, seen = new Set()) {
+  if (!key || seen.has(key) || !deck?.elements?.[key]) return [];
+  seen.add(key);
+  const item = deck.elements[key];
+  return [item, ...(item.children || []).flatMap(child => deckDescendants(deck, child, seen))];
+}
+
+export function buildDeckContext(deck, selectedSlide) {
+  if (!deck?.root || !deck.elements?.[deck.root]) return '';
+  const root = deck.elements[deck.root];
+  const slideKeys = (root.children || []).filter(key => deck.elements[key]?.type === 'Slide');
+  if (!slideKeys.length) return '';
+  const lines = ['', `ACTIVE PRESENTATION (${root.props?.title || 'Untitled deck'} · ${slideKeys.length} slides):`];
+  slideKeys.slice(0, 12).forEach((key, index) => {
+    const slide = deck.elements[key];
+    const items = deckDescendants(deck, key).slice(1).map(item => {
+      const props = item.props || {};
+      const content = props.text || props.value || (props.items ? props.items.join(' · ') : '') || props.id || '';
+      return `${item.type}${content ? `: ${String(content).slice(0, 220)}` : ''}`;
+    });
+    const notes = slide.props?.speakerNotes ? ` · Speaker notes: ${String(slide.props.speakerNotes).slice(0, 300)}` : '';
+    lines.push(`--- SLIDE ${index + 1}${key === selectedSlide ? ' (SELECTED)' : ''} · ${slide.props?.layout || 'content'}${slide.props?.eyebrow ? ` · ${slide.props.eyebrow}` : ''}${notes} ---`, ...items.slice(0, 12));
+  });
+  return lines.join('\n');
+}
+
+export function buildVaultContext(files, docs, activeId, { references = [], highlights = {}, deck = null, selectedSlide = null } = {}) {
   const notes = files.filter(f => !f.folder);
   const parts = [`VAULT (${notes.length} notes):`];
   const active = notes.find(n => n.id === activeId);
@@ -28,7 +57,21 @@ export function buildVaultContext(files, docs, activeId) {
     if (active && n.id === active.id) continue;
     parts.push(`--- ${n.name} ---`, (docs[n.id] || '(empty)').slice(0, 600));
   }
-  return parts.join('\n').slice(0, 9000);
+  const research = [];
+  if (references.length) {
+    research.push('', `RESEARCH LIBRARY (${references.length} papers):`);
+    for (const ref of references.slice(0, 20)) {
+      const paperId = ref.citationKey || ref.url || (ref.title ? 'local:' + ref.title : null);
+      const paperHighlights = highlights[paperId] || [];
+      research.push(
+        `--- ${ref.title || 'Untitled paper'} ---`,
+        `Status: ${ref.status || 'toread'}${ref.year ? ` · ${ref.year}` : ''}${ref.citationKey ? ` · [@${ref.citationKey}]` : ''}`,
+        ref.abstract ? `Abstract: ${ref.abstract.slice(0, 500)}` : '',
+        paperHighlights.length ? `Highlights: ${paperHighlights.slice(0, 3).map(h => h.text).join(' | ').slice(0, 900)}` : '',
+      );
+    }
+  }
+  return [...parts, ...research, buildDeckContext(deck, selectedSlide)].join('\n').slice(0, 12000);
 }
 
 async function askOllama(messages) {

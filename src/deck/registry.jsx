@@ -5,9 +5,20 @@ import { createContext, useContext } from 'react';
 import { defineRegistry, StateProvider, VisibilityProvider, ActionProvider } from '@json-render/react';
 import { deckCatalog } from './catalog.js';
 import SketchSnapshot from '../components/SketchSnapshot.jsx';
+import { deckCitationLabel, referenceForCitation } from './references.js';
+
+export const DECK_THEMES = {
+  midnight: { label: 'Midnight', background: '#141518', ink: '#e8eaf0', border: '#2c2f37', light: false },
+  paper: { label: 'Paper', background: '#f4f1e9', ink: '#26221a', border: '#ddd6c4', light: true },
+  seagrass: { label: 'Seagrass', background: '#102a2a', ink: '#e7f3ed', border: '#28504b', light: false, accent: '#65d6b4' },
+};
+
+export function getDeckTheme(id) {
+  return DECK_THEMES[id] || DECK_THEMES.midnight;
+}
 
 /** Vault assets + theme the deck components need at render time. */
-export const DeckAssets = createContext({ sketches: {}, images: {}, light: false });
+export const DeckAssets = createContext({ sketches: {}, images: {}, references: [], light: false });
 
 /** Every context the json-render Renderer requires, in one wrapper. */
 export function DeckProviders({ children }) {
@@ -72,6 +83,8 @@ export const { registry: deckRegistry } = defineRegistry(deckCatalog, {
 
     Columns: ({ children }) => <div className="deck-columns">{children}</div>,
 
+    Column: ({ children }) => <div className="deck-column">{children}</div>,
+
     Sketch: ({ props }) => {
       const { sketches, light } = useContext(DeckAssets);
       const data = sketches[props.id];
@@ -84,11 +97,17 @@ export const { registry: deckRegistry } = defineRegistry(deckCatalog, {
       const src = images[props.id];
       if (!src) return <div className="deck-missing">image “{props.id}” not found</div>;
       return (
-        <figure className="deck-image">
+        <figure className={'deck-image' + (props.fit === 'cover' ? ' cover' : '')}>
           <img src={src} alt={props.caption || 'figure'} />
           {props.caption && <figcaption>{props.caption}</figcaption>}
         </figure>
       );
+    },
+
+    Citation: ({ props }) => {
+      const { references } = useContext(DeckAssets);
+      const reference = referenceForCitation(references, props.citationKey);
+      return <div className="deck-citation" title={reference?.title || props.citationKey}>{props.label || deckCitationLabel(reference, props.citationKey)}</div>;
     },
   },
 });

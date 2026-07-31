@@ -74,6 +74,36 @@ the panel header shows which provider answered, and `[[note names]]` in replies
 are clickable. If neither provider is reachable, the assistant says so instead
 of failing silently.
 
+The assistant is workspace-aware: it receives the open note, other vault notes,
+the reading queue, paper metadata, saved highlights, and the active presentation
+outline. When a slide is selected, it is identified in the context, including
+speaker notes. Replies can be inserted into the open note, saved as a separate
+draft, or explicitly added as an editable block on the selected slide, so
+research assistance becomes part of the vault rather than a disposable chat.
+Quick prompts can explain the open work in plain language or at a technical
+level. In the PDF reader, select a passage to highlight it, or send that exact
+passage to the assistant for a grounded simple or technical explanation.
+
+## Research companion roadmap
+
+Inkwell already supports paper discovery via OpenAlex, a local/imported PDF
+reader, highlight-to-literature-note capture, citation autocomplete, APA/IEEE/
+Chicago bibliography generation, tagged reading queues, duplicate review, saved
+searches, grounded literature maps and evidence matrices, AI deck generation,
+editable slides, linked library citations in slides, presentation mode, and
+standalone HTML deck export (which can be printed to PDF). Local `.pptx`
+outline import preserves slide order and turns readable slide text into editable
+Inkwell deck blocks. Decks can also turn their linked citations into an editable
+APA, IEEE, or Chicago sources slide. The next increments are:
+
+- richer paper triage (collections); current search supports open-access,
+  publication-window, relevance/recent/citation ranking, and venue/retraction cues;
+- richer reference-library workflows (collections, source-quality checks, and saved searches);
+- a deeper slide canvas (image placement, collaborative review, reusable themes,
+  and additional export formats); and
+- explicit assistant tools for proposing and applying safe changes across notes,
+  research records, and decks with a visible review step.
+
 ## Saving your notes
 
 The vault lives in the browser's `localStorage` (per device, per browser):
