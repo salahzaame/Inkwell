@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
+import { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import {
   INITIAL_FILES, INITIAL_DOCS, INITIAL_MSGS, buildInitialSketches, legacySketchToScene,
 } from './data.js';
@@ -13,6 +13,7 @@ import { deckSlideKeys } from './deck/registry.jsx';
 import { deckFromOutlineSlides } from './deck/from-outline.js';
 import { fileToCompressedDataUrl, newImageId } from './images.js';
 import { moveVaultItem, uniqueVaultName } from './vault.js';
+import { DEFAULT_LAMP, applyLamp, nextLamp, normalizeLamp } from './lamp.js';
 import IconRail from './components/IconRail.jsx';
 import Sidebar from './components/Sidebar.jsx';
 import TabBar from './components/TabBar.jsx';
@@ -95,6 +96,11 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settings, setSettings] = useState(saved.settings ?? { localAi: true, sync: false, spell: true, vim: false });
   const [theme, setTheme] = useState({ accent: '#fbbf24', grid: true, paper: true, ...(saved.theme || {}) });
+  // the lamp: one light model, three settings. Persisted on its own key so it
+  // survives vault import/export, which carries documents rather than room state.
+  const [lamp, setLamp] = useState(() => {
+    try { return normalizeLamp(localStorage.getItem('inkwell.lamp')); } catch { return DEFAULT_LAMP; }
+  });
 
   const [slideTemplate, setSlideTemplate] = useState('dark');
   const [importNote, setImportNote] = useState(false);
@@ -144,6 +150,12 @@ export default function App() {
       return [];
     }
   });
+
+  // before paint, so the room is never briefly the wrong colour
+  useLayoutEffect(() => {
+    applyLamp(document.documentElement, lamp);
+    try { localStorage.setItem('inkwell.lamp', lamp); } catch { /* private mode */ }
+  }, [lamp]);
 
   useEffect(() => {
     localStorage.setItem('inkwell:references', JSON.stringify(references));
@@ -876,13 +888,15 @@ export default function App() {
 
   return (
     <div style={{
-      display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden', background: '#17181c',
-      '--acc': theme.accent,
+      display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden',
+      background: 'var(--desk)',
     }}>
       <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
         {!focusMode && (
           <IconRail
             rail={rail}
+            lamp={lamp}
+            onCycleLamp={() => setLamp(l => nextLamp(l))}
             onFiles={() => {
               if (view === 'editor') {
                 setSidebarOpen(o => {

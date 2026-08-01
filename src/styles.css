@@ -1,26 +1,41 @@
 /* ── Inkwell design tokens ─────────────────────────────────────────────
-   One grey ramp, one warm accent (--acc, set inline from settings), and
-   paper-white PDF pages as the brightest thing on screen. Every shell
-   surface reads from these so panels stop drifting apart visually. */
+   COLOUR LIVES IN src/lamp.js, NOT HERE. The lamp is one light model with
+   three settings (daylight / dusk / lamplight) that moves the page and its
+   surround together; App applies the active setting's custom properties to
+   :root at startup. Adding a colour value to this file re-introduces the
+   drift the lamp exists to remove — reach for a token instead.
+
+   Only non-colour scale tokens belong below. */
 :root {
-  --bg-deep: #131418;   /* icon rail, app frame        */
-  --bg-panel: #191b1f;  /* sidebars, chrome bars       */
-  --bg-canvas: #1e2025; /* main working surface        */
-  --bg-raise: #22242b;  /* cards, hovers, inputs       */
-  --bg-raise-2: #262932;
-  --line: #23252b;      /* every hairline border       */
-  --line-2: #2c2f37;    /* interactive borders         */
-  --ink-1: #e2e4ea;     /* primary text                */
-  --ink-2: #9aa0af;     /* secondary text              */
-  --ink-3: #5b6170;     /* faint text, glyphs          */
-  --ok: #34d399;
-  --danger: #f87171;
-  --r-s: 6px;
+  /* radius — 4 / 8 / 14, plus 18 reserved for the note sheet (identity),
+     2 for paper edges, 99px for pills */
+  --r-s: 4px;
   --r-m: 8px;
-  --r-l: 12px;
-  --marker-amber: #fbbf24;
-  --marker-mint: #34d399;
-  --marker-rose: #fb7185;
+  --r-l: 14px;
+  --r-sheet: 18px;
+  --r-paper: 2px;
+  --r-pill: 99px;
+
+  /* space — 4 8 12 16 24 32 48 */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 24px;
+  --sp-6: 32px;
+  --sp-7: 48px;
+
+  /* shadow */
+  --sh-sheet: 0 26px 62px -32px rgba(0,0,0,.7), 0 2px 8px rgba(0,0,0,.3);
+  --sh-page: 0 2px 5px rgba(0,0,0,.34), 0 16px 42px rgba(0,0,0,.3);
+  --sh-pop: 0 8px 26px rgba(0,0,0,.45);
+
+  /* type floor — nothing below 11px ships (the rendered PDF is exempt:
+     it is a document at its own zoom, not UI) */
+  --fs-label: 11px;
+  --fs-ui: 12.5px;
+  --fs-ui-em: 14px;
+  --fs-body: 15px;
 }
 
 html, body, #root { margin: 0; padding: 0; height: 100%; }
@@ -44,6 +59,14 @@ input, textarea { font-family: 'Instrument Sans', system-ui, sans-serif; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
 }
+
+/* one focus ring, legible at all three lamp settings */
+:focus-visible {
+  outline: 2px solid var(--acc);
+  outline-offset: 2px;
+  border-radius: var(--r-s);
+}
+.rail-btn:focus-visible { outline-offset: 1px; }
 
 /* hover states (inline styles carry the base values, so hovers need !important) */
 .hv-item:hover { background: var(--bg-raise) !important; }

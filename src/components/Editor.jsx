@@ -11,15 +11,19 @@ import SketchCanvas from './SketchCanvas.jsx';
 import MermaidDiagram from './MermaidDiagram.jsx';
 
 /* ── palettes: warm "paper" page (Inkwell's signature) vs classic dark ── */
+// Both palettes read the lamp's tokens, so the page moves with the room rather
+// than staying a fixed cream while the surround changes around it.
+// `faint` is deliberately --p-muted / --ink-2, not --ink-3: --ink-3 is retired as
+// a text colour (it fails AA on every surface) and survives only as a hairline.
 const PAL = {
   dark: {
-    ink: '#e7e9ef', body: '#c3c7d1', muted: '#8b90a0', faint: '#5b6170',
-    border: '#2c2f37', card: '#1a1c21', codeBg: '#16181d',
+    ink: 'var(--ink-1)', body: 'var(--ink-1)', muted: 'var(--ink-2)', faint: 'var(--ink-2)',
+    border: 'var(--line-2)', card: 'var(--chrome-2)', codeBg: 'var(--chrome)',
     headFont: "'Instrument Sans', system-ui, sans-serif",
   },
   paper: {
-    ink: '#26221a', body: '#3f3a2f', muted: '#8a8272', faint: '#a49b86',
-    border: '#e0d9c6', card: '#fffdf7', codeBg: '#efe9d9',
+    ink: 'var(--p-ink)', body: 'var(--p-body)', muted: 'var(--p-muted)', faint: 'var(--p-muted)',
+    border: 'var(--page-line)', card: 'var(--page-2)', codeBg: 'var(--page-line)',
     headFont: "'Fraunces', Georgia, serif",
   },
 };
@@ -901,7 +905,8 @@ export default function Editor({
   const iconBtn = { width: '26px', height: '26px', borderRadius: '6px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: pal.muted };
 
   // on paper, the accent gets inked-down so amber stays readable on cream
-  const sheetVars = paper ? { '--acc': `color-mix(in oklab, ${accent} 62%, #3d2f05)` } : {};
+  // on paper the accent becomes --acc-page, the lamp's darkened-for-cream variant
+  const sheetVars = paper ? { '--acc': 'var(--acc-page)' } : {};
 
   return (
     <div
@@ -919,7 +924,7 @@ export default function Editor({
         style={paper ? {
           // in split view the sheet's top edge lines up with the PDF page (44px toolbar + 26px gap)
           maxWidth: '820px', margin: (alignTop ? '70px' : '26px') + ' auto 90px', padding: '42px 52px 26px',
-          background: '#f6f2e7', borderRadius: '18px', position: 'relative', overflow: 'hidden',
+          background: 'var(--page)', borderRadius: 'var(--r-sheet)', position: 'relative', overflow: 'hidden',
           boxShadow: '0 30px 70px -32px rgba(0,0,0,.65), 0 2px 8px rgba(0,0,0,.35)',
           ...sheetVars,
         } : { maxWidth: '700px', margin: (alignTop ? '70px' : '0') + ' auto 0', padding: alignTop ? '0 40px 26px' : '36px 40px 26px' }}
