@@ -5,9 +5,6 @@
 // session was persisted. This module holds that state and resolves it back
 // against the vault on load, since notes can be deleted between sessions.
 //
-// The visible half of this is the ribbon in the reader's gutter — the resume
-// affordance is a physical object in the document, not chrome wrapped around it.
-
 export const SESSION_KEY = 'inkwell.session';
 
 const VIEWS = ['editor', 'graph', 'slides'];
@@ -78,14 +75,4 @@ export function writeSession(storage, session) {
   } catch {
     return false; // private mode / quota — resuming is a convenience, never fatal
   }
-}
-
-/**
- * Where the ribbon sits, as a fraction of the document.
- * Returns null when there is nothing meaningful to mark yet.
- */
-export function ribbonPosition({ scrollTop = 0, scrollHeight = 0, clientHeight = 0 } = {}) {
-  const scrollable = scrollHeight - clientHeight;
-  if (!(scrollable > 24) || scrollTop <= 0) return null;
-  return Math.min(1, Math.max(0, scrollTop / scrollable));
 }

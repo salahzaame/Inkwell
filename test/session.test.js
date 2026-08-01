@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   SESSION_KEY, mostRecentNoteId, normalizeSession, readSession, resolveSession,
-  ribbonPosition, writeSession,
+  writeSession,
 } from '../src/session.js';
 
 const files = [
@@ -101,23 +101,4 @@ test('unreadable storage yields a default session instead of crashing the app', 
 test('a storage write that throws is reported, not raised', () => {
   const full = { getItem: () => null, setItem: () => { throw new Error('QuotaExceeded'); } };
   assert.equal(writeSession(full, { noteId: 'n1' }), false);
-});
-
-/* ── the ribbon ── */
-
-test('the ribbon sits at the fraction of the document you reached', () => {
-  assert.equal(ribbonPosition({ scrollTop: 500, scrollHeight: 2000, clientHeight: 1000 }), 0.5);
-});
-
-test('there is no ribbon before you have scrolled', () => {
-  assert.equal(ribbonPosition({ scrollTop: 0, scrollHeight: 2000, clientHeight: 1000 }), null);
-});
-
-test('a document that fits on screen gets no ribbon', () => {
-  assert.equal(ribbonPosition({ scrollTop: 0, scrollHeight: 800, clientHeight: 1000 }), null);
-  assert.equal(ribbonPosition({ scrollTop: 10, scrollHeight: 1010, clientHeight: 1000 }), null);
-});
-
-test('the ribbon never escapes the gutter', () => {
-  assert.equal(ribbonPosition({ scrollTop: 9999, scrollHeight: 2000, clientHeight: 1000 }), 1);
 });

@@ -873,7 +873,7 @@ export default function App() {
         onInsertSketch={() => activeNote && insertSketch(activeNote.id)}
         onCreateSketch={createSketch}
         onNewNote={newNote}
-        spell={settings.spell} grid={theme.grid} paper={theme.paper} accent={theme.accent}
+        spell={settings.spell} grid={theme.grid} paper={theme.paper}
         sketches={sketches} setSketchData={setSketchData}
         images={images} setImageData={setImageData}
         initialScrollTop={restored.noteId === activeFile ? restored.scrollTop : 0}
@@ -1068,7 +1068,7 @@ export default function App() {
       )}
       {settingsOpen && (
         <SettingsModal
-          settings={settings} setSettings={setSettings} theme={theme} setTheme={setTheme}
+          settings={settings} setSettings={setSettings} theme={theme} setTheme={setTheme} lamp={lamp}
           vault={{ files, docs, sketches, images, decks, settings, theme }}
           onClose={() => setSettingsOpen(false)}
         />

@@ -237,7 +237,7 @@ function RenderedBlock({ b, pal, doc, onDocChange, onWiki, images = {}, onDelete
 export default function Editor({
   note, crumb, doc, files, docs,
   onDocChange, onWiki, onOpen, onRename, onDelete, onInsertSketch, onCreateSketch, onNewNote,
-  spell, grid, paper, accent, sketches, setSketchData,
+  spell, grid, paper, sketches, setSketchData,
   images = {}, setImageData,
   alignTop = false,
   references = [],

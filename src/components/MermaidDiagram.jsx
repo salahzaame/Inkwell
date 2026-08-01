@@ -45,12 +45,18 @@ export default function MermaidDiagram({ text, pal, onConvertToSketch, convertin
     return () => { live = false; };
   }, [text]);
 
+  // longhand: the error state overrides only borderStyle, and mixing shorthand
+  // with longhand makes React warn and can drop the override
   const frame = {
     position: 'relative', margin: '0 0 22px', padding: '16px',
-    border: `1px solid ${pal.border}`, borderRadius: '10px', background: pal.card,
+    borderWidth: '1px', borderStyle: 'solid', borderColor: pal.border,
+    borderRadius: '10px', background: pal.card,
   };
+  // longhand border: the "Edit as sketch" button overrides only borderColor, and
+  // mixing shorthand with longhand makes React warn and can drop the override
   const btn = {
-    border: `1px solid ${pal.border}`, background: 'transparent', color: pal.muted,
+    borderWidth: '1px', borderStyle: 'solid', borderColor: pal.border,
+    background: 'transparent', color: pal.muted,
     borderRadius: '6px', padding: '3px 8px', font: 'inherit', fontSize: '11px', cursor: 'pointer',
   };
 
