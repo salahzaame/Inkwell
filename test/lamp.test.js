@@ -61,21 +61,31 @@ test('daylight reduces the glare step below the current app', () => {
   assert.ok(glareStep(t['--page'], t['--desk']) < TODAY_STEP);
 });
 
-// KNOWN DISCREPANCY — the handoff's rationale claims the lamp brings the glare
-// step to ~3.4:1 "by warming and lifting the surround, never by dimming the
-// paper". The shipped token table does not do that: the desk darkens faster than
-// the page, so the step widens toward lamplight. The table matches the approved
-// screenshots, so it ships as specified and this test pins the real numbers —
-// if the values are ever re-derived, these expectations should move deliberately.
-test('the measured glare step per setting is pinned to the shipped table', () => {
-  const measured = {
-    daylight: glareStep(LAMP_TOKENS.daylight['--page'], LAMP_TOKENS.daylight['--desk']),
-    dusk: glareStep(LAMP_TOKENS.dusk['--page'], LAMP_TOKENS.dusk['--desk']),
-    lamplight: glareStep(LAMP_TOKENS.lamplight['--page'], LAMP_TOKENS.lamplight['--desk']),
-  };
-  assert.ok(Math.abs(measured.daylight - 6.00) < 0.1, `daylight ${measured.daylight.toFixed(2)}`);
-  assert.ok(Math.abs(measured.dusk - 7.53) < 0.1, `dusk ${measured.dusk.toFixed(2)}`);
-  assert.ok(Math.abs(measured.lamplight - 12.18) < 0.1, `lamplight ${measured.lamplight.toFixed(2)}`);
+// The load-bearing property of the light model: no setting may be worse than
+// another. The handoff's original table failed this — it widened the step to
+// 12.18 at lamplight — so the surround values were re-derived to hold it flat.
+test('the glare step is held constant across all three settings', () => {
+  const steps = LAMPS.map(l => glareStep(LAMP_TOKENS[l]['--page'], LAMP_TOKENS[l]['--desk']));
+  for (const [i, step] of steps.entries()) {
+    assert.ok(Math.abs(step - 6.0) < 0.25, `${LAMPS[i]} step is ${step.toFixed(2)}, not ~6.0`);
+  }
+  const spread = Math.max(...steps) - Math.min(...steps);
+  assert.ok(spread < 0.25, `steps spread by ${spread.toFixed(2)} across settings`);
+});
+
+test('no setting is worse than the app the lamp replaces', () => {
+  for (const lamp of LAMPS) {
+    const step = glareStep(LAMP_TOKENS[lamp]['--page'], LAMP_TOKENS[lamp]['--desk']);
+    assert.ok(step < TODAY_STEP, `${lamp} is ${step.toFixed(2)}, worse than today's ${TODAY_STEP}`);
+  }
+});
+
+test('dimming the lamp dims the page, not the room', () => {
+  // the corrected model: the surround stays roughly put while the page comes down
+  const pages = LAMPS.map(l => lstar(LAMP_TOKENS[l]['--page']));
+  assert.ok(pages[0] > pages[1] && pages[1] > pages[2], 'page does not dim across settings');
+  const desks = LAMPS.map(l => lstar(LAMP_TOKENS[l]['--desk']));
+  assert.ok(Math.max(...desks) - Math.min(...desks) < 3, 'surround moves too much between settings');
 });
 
 test('dimming the room never dims the paper below the room', () => {

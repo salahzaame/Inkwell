@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useState } from 'react';
+import { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   INITIAL_FILES, INITIAL_DOCS, INITIAL_MSGS, buildInitialSketches, legacySketchToScene,
 } from './data.js';
@@ -14,6 +14,7 @@ import { deckFromOutlineSlides } from './deck/from-outline.js';
 import { fileToCompressedDataUrl, newImageId } from './images.js';
 import { moveVaultItem, uniqueVaultName } from './vault.js';
 import { DEFAULT_LAMP, applyLamp, nextLamp, normalizeLamp } from './lamp.js';
+import { readSession, resolveSession, writeSession } from './session.js';
 import IconRail from './components/IconRail.jsx';
 import Sidebar from './components/Sidebar.jsx';
 import TabBar from './components/TabBar.jsx';
@@ -77,18 +78,27 @@ function buildSlides(name, crumb, doc) {
 }
 
 export default function App() {
-  const [view, setView] = useState('editor');
+  // Resume where the last session left off, rather than opening the first note in
+  // file order every time. Read once — recomputing per render would re-hit
+  // localStorage constantly and fight the session writer below.
+  const [restored] = useState(() => resolveSession(readSession(localStorage), saved.files ?? INITIAL_FILES));
+
+  const [view, setView] = useState(restored.view);
+  // seeded from the restored session: the session writer runs on mount, and a ref
+  // starting at 0 would overwrite the saved position before Editor can apply it
+  const noteScrollRef = useRef(restored.scrollTop);
+  const scrollSaveRef = useRef(null);
+  // bumped on a settled scroll so the session write is debounced, not per-frame
+  const [scrollTick, setScrollTick] = useState(0);
+  useEffect(() => () => clearTimeout(scrollSaveRef.current), []);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [aiOpen, setAiOpen] = useState(true);
   const [files, setFiles] = useState(saved.files ?? INITIAL_FILES);
   const [docs, setDocs] = useState(saved.docs ?? INITIAL_DOCS);
   const [sketches, setSketches] = useState(() => saved.sketches ?? buildInitialSketches());
   const [images, setImages] = useState(saved.images ?? {});
-  const [activeFile, setActiveFile] = useState((saved.files ?? INITIAL_FILES).find(f => !f.folder)?.id ?? null);
-  const [openTabs, setOpenTabs] = useState(() => {
-    const first = (saved.files ?? INITIAL_FILES).find(f => !f.folder);
-    return first ? [first.id] : [];
-  });
+  const [activeFile, setActiveFile] = useState(restored.noteId);
+  const [openTabs, setOpenTabs] = useState(restored.tabs);
   const [collapsed, setCollapsed] = useState({});
 
   const [switcherOpen, setSwitcherOpen] = useState(false);
@@ -150,6 +160,18 @@ export default function App() {
       return [];
     }
   });
+
+  // remember where this session got to, so the next one resumes.
+  // scroll is a ref, not state — it changes constantly and must not re-render.
+  useEffect(() => {
+    writeSession(localStorage, {
+      noteId: activeFile,
+      tabs: openTabs,
+      view,
+      scrollTop: noteScrollRef.current,
+      paperId: activePdf?.paperId ?? null,
+    });
+  }, [activeFile, openTabs, view, activePdf, scrollTick]);
 
   // before paint, so the room is never briefly the wrong colour
   useLayoutEffect(() => {
@@ -854,6 +876,12 @@ export default function App() {
         spell={settings.spell} grid={theme.grid} paper={theme.paper} accent={theme.accent}
         sketches={sketches} setSketchData={setSketchData}
         images={images} setImageData={setImageData}
+        initialScrollTop={restored.noteId === activeFile ? restored.scrollTop : 0}
+        onScroll={(top) => {
+          noteScrollRef.current = top;
+          clearTimeout(scrollSaveRef.current);
+          scrollSaveRef.current = setTimeout(() => setScrollTick(t => t + 1), 400);
+        }}
         alignTop={alignTop}
         references={references}
       />

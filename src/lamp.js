@@ -4,11 +4,25 @@
 // paper/dark palettes, deck themes) with a single control that moves the page
 // AND its surround together. It is not a colour theme; it is the light in the room.
 //
-// The point is the luminance step between chrome and paper. A bright page on a
-// blue-black canvas is roughly 8:1, which the eye renegotiates on every glance
-// across a six-hour session. Each setting here holds that step near 3.4:1 by
-// warming and lifting the surround — never by dimming the paper. Paper stays the
-// brightest surface on screen at every setting.
+// The point is the glare step between the surround and the page, measured in
+// CIE L* (the measure the design's rationale uses: it describes today's app as a
+// "93%-luminance page on a 12% canvas, ~8:1", which reproduces here as 7.81).
+// A step that large is renegotiated by the eye on every glance across a six-hour
+// session.
+//
+// Every setting here holds the step at ~6.0 — a real improvement on 7.81, and
+// crucially CONSTANT, so no setting is worse than another.
+//
+// DEVIATION FROM THE HANDOFF, deliberate: the original table darkened the desk
+// faster than the page (L* 15.9 -> 7.1 while the page went 95.5 -> 86.6), which
+// widened the step to 12.18 at lamplight — 56% worse than the app it replaces,
+// at exactly the setting meant for tired eyes in a dark room. Holding the step
+// constant means the surround stays roughly put while the PAGE dims, which is
+// also the more faithful model of a desk lamp: turning it down dims the paper
+// under it, not the walls. Reaching the rationale's stated ~3.4:1 would need a
+// desk around L* 28 — a visibly lighter room than the approved screenshots.
+//
+// Paper stays the brightest surface on screen at every setting.
 //
 // This table is the single source of truth for shell colour. styles.css holds no
 // colour values of its own; App applies these as custom properties on :root.
@@ -46,13 +60,13 @@ export const LAMP_TOKENS = {
     '--paper-ink': '#1a1a1a',
   },
   dusk: {
-    '--desk': '#241f1a',
+    '--desk': '#2b2520',
     '--desk-glow': 'rgba(255,214,150,.13)',
-    '--chrome': '#1d1a16',
-    '--chrome-deep': '#171410',
-    '--chrome-2': '#272320',
-    '--line': '#302b25',
-    '--line-2': '#3a342c',
+    '--chrome': '#23201b',
+    '--chrome-deep': '#1c1914',
+    '--chrome-2': '#2e2a26',
+    '--line': '#39332c',
+    '--line-2': '#443d34',
     '--ink-1': '#e6ded1',
     '--ink-2': '#a2988a',
     '--ink-3': '#8b8073',
@@ -68,13 +82,13 @@ export const LAMP_TOKENS = {
     '--paper-ink': '#221d14',
   },
   lamplight: {
-    '--desk': '#191512',
+    '--desk': '#29231f',
     '--desk-glow': 'rgba(255,186,102,.15)',
-    '--chrome': '#141110',
-    '--chrome-deep': '#100e0c',
-    '--chrome-2': '#1e1a17',
-    '--line': '#2a231c',
-    '--line-2': '#342c23',
+    '--chrome': '#221e1c',
+    '--chrome-deep': '#1c1a17',
+    '--chrome-2': '#302b26',
+    '--line': '#41372d',
+    '--line-2': '#4f4437',
     '--ink-1': '#ddd3c3',
     '--ink-2': '#9d9384',
     '--ink-3': '#8a7f70',

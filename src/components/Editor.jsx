@@ -241,7 +241,10 @@ export default function Editor({
   images = {}, setImageData,
   alignTop = false,
   references = [],
+  initialScrollTop = 0,
+  onScroll,
 }) {
+  const scrollRef = useRef(null);
   const taRef = useRef(null);
   const richRef = useRef(null);
   const imageInputRef = useRef(null);   // hidden file picker for image inserts
@@ -257,6 +260,44 @@ export default function Editor({
   const [bibliographyStyle, setBibliographyStyle] = useState('apa');
   const [convertingDiagram, setConvertingDiagram] = useState(null); // line0 of the block being converted
   const [diagramError, setDiagramError] = useState(null);
+
+  // Restore the resumed scroll position. The sheet keeps growing for several
+  // frames after mount — blocks, webfonts, sketch and image embeds all settle
+  // late — and assigning scrollTop before it is tall enough silently clamps to
+  // the current maximum. So retry until it takes, or until the reader moves.
+  useEffect(() => {
+    const target = initialScrollTop;
+    const el = scrollRef.current;
+    if (!target || !el) return undefined;
+
+    let timer = 0;
+    let tries = 0;
+    let abandoned = false;
+    const yieldToReader = () => { abandoned = true; };
+
+    // setTimeout, not requestAnimationFrame: rAF does not fire while the page is
+    // hidden, so a note restored into a background tab would never scroll.
+    const attempt = () => {
+      if (abandoned || !scrollRef.current) return;
+      scrollRef.current.scrollTop = target;
+      // stop as soon as the position sticks; give up after ~500ms of growing
+      if (Math.abs(scrollRef.current.scrollTop - target) > 1 && ++tries < 30) {
+        timer = setTimeout(attempt, 16);
+      }
+    };
+    attempt();
+
+    el.addEventListener('wheel', yieldToReader, { passive: true, once: true });
+    el.addEventListener('touchstart', yieldToReader, { passive: true, once: true });
+    return () => {
+      clearTimeout(timer);
+      el.removeEventListener('wheel', yieldToReader);
+      el.removeEventListener('touchstart', yieldToReader);
+    };
+    // keyed on the note, not on initialScrollTop: re-running as the reader
+    // scrolls would fight them for control of the scroller
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [note.id]);
 
   const pal = paper ? PAL.paper : PAL.dark;
   const blocks = parseBlocks(doc);
@@ -910,7 +951,9 @@ export default function Editor({
 
   return (
     <div
+      ref={scrollRef}
       style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}
+      onScroll={(e) => onScroll?.(e.currentTarget.scrollTop)}
       onDragOver={(e) => { if (e.dataTransfer?.types?.includes('Files')) e.preventDefault(); }}
       onDrop={onSheetDrop}
     >
