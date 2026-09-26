@@ -75,17 +75,28 @@ export function buildVaultContext(files, docs, activeId, { references = [], high
   return [...parts, ...research, buildDeckContext(deck, selectedSlide)].join('\n').slice(0, 12000);
 }
 
-async function askOllama(messages) {
+/** Pick the chat model to use: the one named in settings if installed, else the first non-embedding model. */
+export function pickOllamaModel(models = [], preferred) {
+  const chat = models.map(m => m.name).filter(name => !/embed/i.test(name));
+  return (preferred && chat.includes(preferred) ? preferred : chat[0]) ?? null;
+}
+
+async function askOllama(messages, { model: preferred } = {}) {
   const tags = await fetch(`${OLLAMA}/api/tags`, { signal: AbortSignal.timeout(1500) }).then(r => r.json());
-  const models = tags.models || [];
-  const model = (models.find(m => /llama/i.test(m.name)) ?? models[0])?.name;
+  const model = pickOllamaModel(tags.models, preferred);
   if (!model) throw new Error('ollama has no models pulled');
-  const res = await fetch(`${OLLAMA}/api/chat`, {
+  // Thinking off: on gemma4:12b it turned a 3 s answer into ~90 s of hidden reasoning.
+  // num_ctx 8192: Ollama's 4096 default silently truncates the vault context.
+  const chat = (body) => fetch(`${OLLAMA}/api/chat`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ model, messages, stream: false }),
-    signal: AbortSignal.timeout(90000),
+    body: JSON.stringify({ model, messages, stream: false, options: { num_ctx: 8192 }, ...body }),
+    // the first request after a while also loads the model into GPU memory
+    signal: AbortSignal.timeout(180000),
   });
+  let res = await chat({ think: false });
+  // models without a thinking switch reject the field; ask again without it
+  if (res.status === 400) res = await chat({});
   if (!res.ok) throw new Error('ollama HTTP ' + res.status);
   const j = await res.json();
   const text = (j.message?.content || '').trim();
@@ -172,7 +183,7 @@ function providerChain({ preferLocal, settings, maxTokens }) {
     ? (messages) => askOpenRouter(messages, maxTokens, { key: settings.openrouterKey, model: settings.openrouterModel })
     : null;
   const poll = (messages) => askPollinations(messages, maxTokens);
-  const oll = (messages) => askOllama(messages);
+  const oll = (messages) => askOllama(messages, { model: settings?.ollamaModel });
   if (preferLocal) chain.push(oll);
   if (or) chain.push(or);
   chain.push(poll);
@@ -180,13 +191,27 @@ function providerChain({ preferLocal, settings, maxTokens }) {
   return chain;
 }
 
-/** One-shot completion through the provider chain (OpenRouter → pollinations → ollama). */
-export async function completeChat({ messages, maxTokens, settings }) {
-  let lastErr;
-  for (const ask of providerChain({ preferLocal: false, settings, maxTokens })) {
-    try { return await ask(messages); } catch (e) { lastErr = e; }
+/**
+ * Try each provider in order. When the local model was preferred but failed,
+ * say so in the provider label: the notes went to the cloud instead.
+ */
+async function runChain(chain, messages, preferLocal) {
+  let lastErr, localErr;
+  for (const [i, ask] of chain.entries()) {
+    try {
+      const result = await ask(messages);
+      return localErr ? { ...result, provider: `${result.provider} (ollama unavailable)`, localError: localErr } : result;
+    } catch (e) {
+      lastErr = e;
+      if (preferLocal && i === 0) localErr = e.message;
+    }
   }
   throw lastErr ?? new Error('no model provider available');
+}
+
+/** One-shot completion through the provider chain (OpenRouter → pollinations → ollama). */
+export async function completeChat({ messages, maxTokens, settings }) {
+  return runChain(providerChain({ preferLocal: false, settings, maxTokens }), messages, false);
 }
 
 /**
@@ -198,11 +223,7 @@ export async function proposeNoteEdits({ request, vault, editPrompt, preferLocal
     { role: 'system', content: systemPrompt(vault) + '\n\n' + editPrompt },
     { role: 'user', content: request },
   ];
-  let lastErr;
-  for (const ask of providerChain({ preferLocal, settings })) {
-    try { return await ask(messages); } catch (e) { lastErr = e; }
-  }
-  throw lastErr ?? new Error('no assistant provider available');
+  return runChain(providerChain({ preferLocal, settings }), messages, preferLocal);
 }
 
 /**
@@ -214,9 +235,5 @@ export async function askAssistant({ history, vault, preferLocal, settings }) {
     { role: 'system', content: systemPrompt(vault) },
     ...history.slice(-10).map(m => ({ role: m.role === 'u' ? 'user' : 'assistant', content: m.text })),
   ];
-  let lastErr;
-  for (const ask of providerChain({ preferLocal, settings })) {
-    try { return await ask(messages); } catch (e) { lastErr = e; }
-  }
-  throw lastErr ?? new Error('no assistant provider available');
+  return runChain(providerChain({ preferLocal, settings }), messages, preferLocal);
 }

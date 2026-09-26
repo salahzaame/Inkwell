@@ -674,7 +674,7 @@ export default function App() {
     } catch {
       setAiMessages(m => [...m, {
         role: 'a',
-        text: 'I couldn\'t reach a model. Check your internet connection — or run Ollama with a model pulled (e.g. "ollama pull llama3.2") and enable "Local assistant" in Settings.',
+        text: 'I couldn\'t reach a model. Check your internet connection — or run Ollama with a model pulled (e.g. "ollama pull gemma4:12b") and enable "Local assistant" in Settings.',
       }]);
     } finally {
       setAiTyping(false);
