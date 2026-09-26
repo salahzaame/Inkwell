@@ -16,7 +16,7 @@ const getHash = () => window.location.hash;
 
 function AppLoading() {
   return (
-    <div style={{ height: '100vh', display: 'grid', placeItems: 'center', background: '#17181c', color: '#8b90a0', fontFamily: "'Instrument Sans', system-ui, sans-serif", fontSize: '14px' }}>
+    <div style={{ height: '100vh', display: 'grid', placeItems: 'center', background: '#2b2723', color: '#a89e91', fontFamily: "'Instrument Sans', system-ui, sans-serif", fontSize: '14px' }}>
       Opening Inkwell…
     </div>
   );

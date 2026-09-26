@@ -1,4 +1,4 @@
-import { ACCENTS } from '../data.js';
+import { LAMPS, LAMP_LABEL } from '../lamp.js';
 
 function Toggle({ on }) {
   return (
@@ -22,7 +22,7 @@ function Row({ title, sub, right, onClick, last }) {
 
 const SECTION = { fontSize: '11px', fontWeight: 600, letterSpacing: '.5px', textTransform: 'uppercase', color: '#5b6170', margin: '18px 0 2px' };
 
-export default function SettingsModal({ settings, setSettings, theme, setTheme, vault, onClose }) {
+export default function SettingsModal({ settings, setSettings, theme, setTheme, lamp, vault, onClose }) {
   const tog = (k) => () => setSettings(s => ({ ...s, [k]: !s[k] }));
 
   const exportVault = () => {
@@ -91,20 +91,21 @@ export default function SettingsModal({ settings, setSettings, theme, setTheme, 
           </div>
 
           <div style={SECTION}>Appearance</div>
-          <Row
-            title="Accent color" sub="Links, tags and highlights"
-            right={(
-              <div style={{ display: 'flex', gap: '8px' }}>
-                {ACCENTS.map(hex => (
-                  <span
-                    key={hex}
-                    onClick={() => setTheme(t => ({ ...t, accent: hex }))}
-                    style={{ width: '18px', height: '18px', borderRadius: '50%', background: hex, cursor: 'pointer', outline: theme.accent === hex ? '2px solid ' + hex : 'none', outlineOffset: '2px' }}
-                  />
-                ))}
-              </div>
-            )}
-          />
+          {/* The accent picker is retired: the lamp owns --acc and --acc-page,
+              and each setting's pair is contrast-checked against its own
+              surfaces. A free-choice accent would break those guarantees
+              (teal on cream paper fails AA outright). Light is set with the
+              lamp control in the rail. */}
+          <Row title="Light" sub={`${LAMP_LABEL[lamp] ?? 'Daylight'} — set with the lamp at the foot of the rail`} right={(
+            <div style={{ display: 'flex', gap: '5px', alignItems: 'center' }}>
+              {LAMPS.map(l => (
+                <span key={l} style={{
+                  width: '8px', height: '8px', borderRadius: '50%',
+                  background: l === lamp ? 'var(--acc)' : 'var(--line-2)',
+                }} />
+              ))}
+            </div>
+          )} />
           <Row title="Paper page" sub="Notes on a warm paper sheet — Inkwell's signature look" right={<Toggle on={!!theme.paper} />} onClick={() => setTheme(t => ({ ...t, paper: !t.paper }))} />
           <Row title="Canvas grid" sub="Show a grid in sketch blocks" last right={<Toggle on={!!theme.grid} />} onClick={() => setTheme(t => ({ ...t, grid: !t.grid }))} />
         </div>

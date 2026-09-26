@@ -7,17 +7,47 @@ const OLLAMA = 'http://localhost:11434';
 function systemPrompt(vault) {
   return [
     "You are the assistant built into Inkwell, a local-first markdown note-taking app with embedded Excalidraw sketches.",
+    'You are a research collaborator, not a generic chatbot. Use the workspace below: notes, literature records, reading status, highlights, and any active presentation deck.',
     'Answer questions about the user\'s vault using the notes below. Be concise (1-4 sentences unless asked for more), plain text only — no markdown headings.',
     'The section marked OPEN NOTE is the note the user is looking at right now — when they say "this note", that is the one they mean. Never ask which note; use the open one.',
+    'For explicit draft or rewrite requests, return complete markdown only; that format overrides the default plain-text response style.',
     'When you reference a note, call it by its exact name in double brackets, e.g. [[Weekly Sync]].',
-    'If the user asks you to write or draft content, produce markdown they can paste into a note.',
+    'If the user asks you to write or draft content, produce clean markdown they can paste into a note. Do not invent papers, quotations, statistics, or citations that are not in the workspace.',
+    'Inkwell renders ```mermaid code fences as real diagrams inside notes, and the reader can convert one into an editable Excalidraw sketch. So when asked to draw, diagram, visualise, or map something — a flowchart, architecture, process, timeline, causal chain, or relationship — answer with a ```mermaid fence. Never say you cannot draw, and never suggest pasting the code elsewhere. Keep the diagram to roughly 12 nodes and use flowchart/sequence/state/ER syntax that mermaid 11 accepts.',
+    'When asked to explain, match the requested level (plain-language or technical) and tie the explanation back to the open note, active slide, or relevant paper when possible.',
     '',
     vault,
   ].join('\n');
 }
 
 /** Compact plain-text dump of the vault: active note in full, others truncated. */
-export function buildVaultContext(files, docs, activeId) {
+function deckDescendants(deck, key, seen = new Set()) {
+  if (!key || seen.has(key) || !deck?.elements?.[key]) return [];
+  seen.add(key);
+  const item = deck.elements[key];
+  return [item, ...(item.children || []).flatMap(child => deckDescendants(deck, child, seen))];
+}
+
+export function buildDeckContext(deck, selectedSlide) {
+  if (!deck?.root || !deck.elements?.[deck.root]) return '';
+  const root = deck.elements[deck.root];
+  const slideKeys = (root.children || []).filter(key => deck.elements[key]?.type === 'Slide');
+  if (!slideKeys.length) return '';
+  const lines = ['', `ACTIVE PRESENTATION (${root.props?.title || 'Untitled deck'} · ${slideKeys.length} slides):`];
+  slideKeys.slice(0, 12).forEach((key, index) => {
+    const slide = deck.elements[key];
+    const items = deckDescendants(deck, key).slice(1).map(item => {
+      const props = item.props || {};
+      const content = props.text || props.value || (props.items ? props.items.join(' · ') : '') || props.id || '';
+      return `${item.type}${content ? `: ${String(content).slice(0, 220)}` : ''}`;
+    });
+    const notes = slide.props?.speakerNotes ? ` · Speaker notes: ${String(slide.props.speakerNotes).slice(0, 300)}` : '';
+    lines.push(`--- SLIDE ${index + 1}${key === selectedSlide ? ' (SELECTED)' : ''} · ${slide.props?.layout || 'content'}${slide.props?.eyebrow ? ` · ${slide.props.eyebrow}` : ''}${notes} ---`, ...items.slice(0, 12));
+  });
+  return lines.join('\n');
+}
+
+export function buildVaultContext(files, docs, activeId, { references = [], highlights = {}, deck = null, selectedSlide = null } = {}) {
   const notes = files.filter(f => !f.folder);
   const parts = [`VAULT (${notes.length} notes):`];
   const active = notes.find(n => n.id === activeId);
@@ -28,20 +58,45 @@ export function buildVaultContext(files, docs, activeId) {
     if (active && n.id === active.id) continue;
     parts.push(`--- ${n.name} ---`, (docs[n.id] || '(empty)').slice(0, 600));
   }
-  return parts.join('\n').slice(0, 9000);
+  const research = [];
+  if (references.length) {
+    research.push('', `RESEARCH LIBRARY (${references.length} papers):`);
+    for (const ref of references.slice(0, 20)) {
+      const paperId = ref.citationKey || ref.url || (ref.title ? 'local:' + ref.title : null);
+      const paperHighlights = highlights[paperId] || [];
+      research.push(
+        `--- ${ref.title || 'Untitled paper'} ---`,
+        `Status: ${ref.status || 'toread'}${ref.year ? ` · ${ref.year}` : ''}${ref.citationKey ? ` · [@${ref.citationKey}]` : ''}`,
+        ref.abstract ? `Abstract: ${ref.abstract.slice(0, 500)}` : '',
+        paperHighlights.length ? `Highlights: ${paperHighlights.slice(0, 3).map(h => h.text).join(' | ').slice(0, 900)}` : '',
+      );
+    }
+  }
+  return [...parts, ...research, buildDeckContext(deck, selectedSlide)].join('\n').slice(0, 12000);
 }
 
-async function askOllama(messages) {
+/** Pick the chat model to use: the one named in settings if installed, else the first non-embedding model. */
+export function pickOllamaModel(models = [], preferred) {
+  const chat = models.map(m => m.name).filter(name => !/embed/i.test(name));
+  return (preferred && chat.includes(preferred) ? preferred : chat[0]) ?? null;
+}
+
+async function askOllama(messages, { model: preferred } = {}) {
   const tags = await fetch(`${OLLAMA}/api/tags`, { signal: AbortSignal.timeout(1500) }).then(r => r.json());
-  const models = tags.models || [];
-  const model = (models.find(m => /llama/i.test(m.name)) ?? models[0])?.name;
+  const model = pickOllamaModel(tags.models, preferred);
   if (!model) throw new Error('ollama has no models pulled');
-  const res = await fetch(`${OLLAMA}/api/chat`, {
+  // Thinking off: on gemma4:12b it turned a 3 s answer into ~90 s of hidden reasoning.
+  // num_ctx 8192: Ollama's 4096 default silently truncates the vault context.
+  const chat = (body) => fetch(`${OLLAMA}/api/chat`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ model, messages, stream: false }),
-    signal: AbortSignal.timeout(90000),
+    body: JSON.stringify({ model, messages, stream: false, options: { num_ctx: 8192 }, ...body }),
+    // the first request after a while also loads the model into GPU memory
+    signal: AbortSignal.timeout(180000),
   });
+  let res = await chat({ think: false });
+  // models without a thinking switch reject the field; ask again without it
+  if (res.status === 400) res = await chat({});
   if (!res.ok) throw new Error('ollama HTTP ' + res.status);
   const j = await res.json();
   const text = (j.message?.content || '').trim();
@@ -128,7 +183,7 @@ function providerChain({ preferLocal, settings, maxTokens }) {
     ? (messages) => askOpenRouter(messages, maxTokens, { key: settings.openrouterKey, model: settings.openrouterModel })
     : null;
   const poll = (messages) => askPollinations(messages, maxTokens);
-  const oll = (messages) => askOllama(messages);
+  const oll = (messages) => askOllama(messages, { model: settings?.ollamaModel });
   if (preferLocal) chain.push(oll);
   if (or) chain.push(or);
   chain.push(poll);
@@ -136,13 +191,39 @@ function providerChain({ preferLocal, settings, maxTokens }) {
   return chain;
 }
 
-/** One-shot completion through the provider chain (OpenRouter → pollinations → ollama). */
-export async function completeChat({ messages, maxTokens, settings }) {
-  let lastErr;
-  for (const ask of providerChain({ preferLocal: false, settings, maxTokens })) {
-    try { return await ask(messages); } catch (e) { lastErr = e; }
+/**
+ * Try each provider in order. When the local model was preferred but failed,
+ * say so in the provider label: the notes went to the cloud instead.
+ */
+async function runChain(chain, messages, preferLocal) {
+  let lastErr, localErr;
+  for (const [i, ask] of chain.entries()) {
+    try {
+      const result = await ask(messages);
+      return localErr ? { ...result, provider: `${result.provider} (ollama unavailable)`, localError: localErr } : result;
+    } catch (e) {
+      lastErr = e;
+      if (preferLocal && i === 0) localErr = e.message;
+    }
   }
   throw lastErr ?? new Error('no model provider available');
+}
+
+/** One-shot completion through the provider chain (OpenRouter → pollinations → ollama). */
+export async function completeChat({ messages, maxTokens, settings }) {
+  return runChain(providerChain({ preferLocal: false, settings, maxTokens }), messages, false);
+}
+
+/**
+ * Ask for structured note edits instead of prose. Returns { text, provider } where
+ * text is the raw JSON payload — parsing and validation happen in assistant-edits.js.
+ */
+export async function proposeNoteEdits({ request, vault, editPrompt, preferLocal, settings }) {
+  const messages = [
+    { role: 'system', content: systemPrompt(vault) + '\n\n' + editPrompt },
+    { role: 'user', content: request },
+  ];
+  return runChain(providerChain({ preferLocal, settings }), messages, preferLocal);
 }
 
 /**
@@ -154,9 +235,5 @@ export async function askAssistant({ history, vault, preferLocal, settings }) {
     { role: 'system', content: systemPrompt(vault) },
     ...history.slice(-10).map(m => ({ role: m.role === 'u' ? 'user' : 'assistant', content: m.text })),
   ];
-  let lastErr;
-  for (const ask of providerChain({ preferLocal, settings })) {
-    try { return await ask(messages); } catch (e) { lastErr = e; }
-  }
-  throw lastErr ?? new Error('no assistant provider available');
+  return runChain(providerChain({ preferLocal, settings }), messages, preferLocal);
 }

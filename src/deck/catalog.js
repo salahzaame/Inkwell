@@ -10,6 +10,7 @@ export const deckCatalog = defineCatalog(schema, {
     Deck: {
       props: z.object({
         title: z.string(),
+        theme: z.enum(['midnight', 'paper', 'seagrass']).nullable().optional(),
       }),
       description: 'The presentation root. Its children are Slide elements in order.',
     },
@@ -17,6 +18,7 @@ export const deckCatalog = defineCatalog(schema, {
       props: z.object({
         layout: z.enum(['title', 'content', 'statement', 'end']),
         eyebrow: z.string().nullable(),
+        speakerNotes: z.string().nullable().optional(),
       }),
       description: 'One 16:9 slide. layout "title" opens the deck, "content" is a standard slide, "statement" centers one big idea, "end" closes. eyebrow is a small label above the content (e.g. "Methodology").',
     },
@@ -65,6 +67,10 @@ export const deckCatalog = defineCatalog(schema, {
       props: z.object({}),
       description: 'Lays its children out side by side in equal columns (use 2-3 children).',
     },
+    Column: {
+      props: z.object({}),
+      description: 'A vertical group inside Columns. Use it to pair a small heading with text, bullets, or an image.',
+    },
     Sketch: {
       props: z.object({
         id: z.string(),
@@ -75,8 +81,16 @@ export const deckCatalog = defineCatalog(schema, {
       props: z.object({
         id: z.string(),
         caption: z.string().nullable(),
+        fit: z.enum(['contain', 'cover']).nullable().optional(),
       }),
-      description: 'Embeds one of the note\'s existing images by id. Only use ids listed as available.',
+      description: 'Embeds one of the note\'s existing images by id. Only use ids listed as available. fit optionally crops it to fill its frame.',
+    },
+    Citation: {
+      props: z.object({
+        citationKey: z.string(),
+        label: z.string().nullable(),
+      }),
+      description: 'A compact source attribution linked to a research-library citation key. Use only keys listed as available.',
     },
   },
   actions: {},

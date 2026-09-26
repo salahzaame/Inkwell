@@ -1,19 +1,29 @@
 import { useEffect, useRef, useState } from 'react';
+import { convertToExcalidrawElements } from '@excalidraw/excalidraw';
 import { fmtEdited } from '../data.js';
 import { parseBlocks, Inline, toggleTaskInDoc, extractTags, findMentions } from '../markdown.jsx';
 import { fileToCompressedDataUrl, newImageId } from '../images.js';
+import { BIBLIOGRAPHY_STYLES, generateBibliography } from '../bibliography.js';
+import { wikilinkEditorHtml } from '../wiki-editor.js';
+import { addTableRowToDoc, updateTableCellInDoc } from '../tables.js';
+import { MERMAID_SNIPPET, diagramErrorMessage, isMermaidBlock, replaceBlockWithSketchFence } from '../diagrams.js';
 import SketchCanvas from './SketchCanvas.jsx';
+import MermaidDiagram from './MermaidDiagram.jsx';
 
 /* ── palettes: warm "paper" page (Inkwell's signature) vs classic dark ── */
+// Both palettes read the lamp's tokens, so the page moves with the room rather
+// than staying a fixed cream while the surround changes around it.
+// `faint` is deliberately --p-muted / --ink-2, not --ink-3: --ink-3 is retired as
+// a text colour (it fails AA on every surface) and survives only as a hairline.
 const PAL = {
   dark: {
-    ink: '#e7e9ef', body: '#c3c7d1', muted: '#8b90a0', faint: '#5b6170',
-    border: '#2c2f37', card: '#1a1c21', codeBg: '#16181d',
+    ink: 'var(--ink-1)', body: 'var(--ink-1)', muted: 'var(--ink-2)', faint: 'var(--ink-2)',
+    border: 'var(--line-2)', card: 'var(--chrome-2)', codeBg: 'var(--chrome)',
     headFont: "'Instrument Sans', system-ui, sans-serif",
   },
   paper: {
-    ink: '#26221a', body: '#3f3a2f', muted: '#8a8272', faint: '#a49b86',
-    border: '#e0d9c6', card: '#fffdf7', codeBg: '#efe9d9',
+    ink: 'var(--p-ink)', body: 'var(--p-body)', muted: 'var(--p-muted)', faint: 'var(--p-muted)',
+    border: 'var(--page-line)', card: 'var(--page-2)', codeBg: 'var(--page-line)',
     headFont: "'Fraunces', Georgia, serif",
   },
 };
@@ -30,6 +40,7 @@ const SLASH_COMMANDS = [
   { id: 'table', label: 'Table', glyph: '⊞', snippet: '| Column 1 | Column 2 | Column 3 |\n| --- | --- | --- |\n|   |   |   |\n|   |   |   |\n', caretOffset: 2 },
   { id: 'quote', label: 'Quote', glyph: '❝', snippet: '> ' },
   { id: 'code', label: 'Code block', glyph: '</>', snippet: '```\n\n```\n', caretOffset: 4 },
+  { id: 'diagram', label: 'Diagram (Mermaid)', glyph: '◈', snippet: MERMAID_SNIPPET, commitBlock: true },
   { id: 'divider', label: 'Divider', glyph: '—', snippet: '---\n\n', commitBlock: true },
   { id: 'sketch', label: 'Sketch (Excalidraw)', glyph: '✎', sketch: true, commitBlock: true },
   { id: 'image', label: 'Image (or just paste one)', glyph: '▣', image: true },
@@ -53,7 +64,78 @@ function caretPos(ta) {
 
 const linesOf = (doc) => (doc === '' ? [] : doc.split('\n'));
 
-function RenderedBlock({ b, pal, doc, onDocChange, onWiki, images = {}, onDeleteImage }) {
+function markdownFromRichNode(node) {
+  if (node.nodeType === Node.TEXT_NODE) return node.textContent || '';
+  if (node.nodeType !== Node.ELEMENT_NODE) return '';
+  if (node.dataset?.wiki != null) return `[[${node.dataset.wiki}]]`;
+  if (node.tagName === 'BR') return '\n';
+  const body = [...node.childNodes].map(markdownFromRichNode).join('');
+  return node.tagName === 'DIV' ? `\n${body}` : body;
+}
+
+function FriendlyWikilinkEditor({ value, style, spellCheck, onChange, onBlur, editorRef }) {
+  const ownRef = useRef(null);
+  const ref = editorRef || ownRef;
+  useEffect(() => {
+    if (ref.current && document.activeElement !== ref.current) ref.current.innerHTML = wikilinkEditorHtml(value);
+  }, [value]);
+  return (
+    <div
+      ref={ref}
+      className="blk-rich"
+      contentEditable
+      suppressContentEditableWarning
+      spellCheck={spellCheck}
+      onInput={(event) => onChange([...event.currentTarget.childNodes].map(markdownFromRichNode).join('').replace(/^\n/, ''))}
+      onBlur={onBlur}
+      style={style}
+    />
+  );
+}
+
+function EditableTable({ block, pal, doc, onDocChange, spellCheck }) {
+  const cell = { border: `1px solid ${pal.border}`, padding: '0', textAlign: 'left' };
+  const inputStyle = {
+    boxSizing: 'border-box', width: '100%', minWidth: '86px', border: 'none', outline: 'none',
+    background: 'transparent', color: pal.body, padding: '7px 12px', font: 'inherit', lineHeight: 1.6,
+  };
+  const changeCell = (rowIndex, columnIndex, value) => onDocChange(updateTableCellInDoc(doc, block, rowIndex, columnIndex, value));
+  const renderCell = (value, rowIndex, columnIndex, header = false) => (
+    <input
+      data-table-cell
+      aria-label={`${header ? 'Column heading' : 'Table cell'} ${columnIndex + 1}${header ? '' : `, row ${rowIndex + 1}`}`}
+      value={value ?? ''}
+      spellCheck={spellCheck}
+      onMouseDown={(event) => event.stopPropagation()}
+      onChange={(event) => changeCell(rowIndex, columnIndex, event.target.value)}
+      onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); event.currentTarget.blur(); } }}
+      style={{ ...inputStyle, fontWeight: header ? 600 : 400, color: header ? pal.ink : pal.body }}
+    />
+  );
+  return (
+    <div style={{ overflowX: 'auto', margin: '0 0 22px' }} onMouseDown={(event) => event.stopPropagation()}>
+      <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: '14px', lineHeight: 1.6 }}>
+        <thead>
+          <tr>{block.header.map((value, columnIndex) => <th key={columnIndex} style={{ ...cell, background: pal.card }}>{renderCell(value, -1, columnIndex, true)}</th>)}</tr>
+        </thead>
+        <tbody>
+          {block.rows.map((row, rowIndex) => (
+            <tr key={rowIndex}>{block.header.map((_, columnIndex) => <td key={columnIndex} style={cell}>{renderCell(row[columnIndex], rowIndex, columnIndex)}</td>)}</tr>
+          ))}
+        </tbody>
+      </table>
+      <button
+        data-table-control
+        type="button"
+        onMouseDown={(event) => event.stopPropagation()}
+        onClick={() => onDocChange(addTableRowToDoc(doc, block))}
+        style={{ marginTop: '8px', border: 'none', background: 'transparent', color: pal.muted, padding: '3px 0', cursor: 'pointer', fontSize: '12px' }}
+      >+ Add row</button>
+    </div>
+  );
+}
+
+function RenderedBlock({ b, pal, doc, onDocChange, onWiki, images = {}, onDeleteImage, spellCheck, onConvertDiagram, convertingDiagram }) {
   const pStyle = { fontSize: '15.5px', lineHeight: 1.75, color: pal.body, margin: '0 0 22px' };
   const toggleTask = (ix) => onDocChange(toggleTaskInDoc(doc, ix));
 
@@ -99,6 +181,16 @@ function RenderedBlock({ b, pal, doc, onDocChange, onWiki, images = {}, onDelete
       </blockquote>
     );
   }
+  if (isMermaidBlock(b)) {
+    return (
+      <MermaidDiagram
+        text={b.text}
+        pal={pal}
+        converting={convertingDiagram === b.line0}
+        onConvertToSketch={onConvertDiagram ? () => onConvertDiagram(b) : null}
+      />
+    );
+  }
   if (b.t === 'code') {
     return (
       <pre style={{ background: pal.codeBg, border: `1px solid ${pal.border}`, borderRadius: '10px', padding: '12px 16px', fontSize: '13px', lineHeight: 1.6, color: pal.body, overflowX: 'auto', margin: '0 0 22px', fontFamily: 'ui-monospace, Consolas, monospace' }}>
@@ -107,21 +199,7 @@ function RenderedBlock({ b, pal, doc, onDocChange, onWiki, images = {}, onDelete
     );
   }
   if (b.t === 'table') {
-    const cell = { border: `1px solid ${pal.border}`, padding: '7px 12px', textAlign: 'left' };
-    return (
-      <div style={{ overflowX: 'auto', margin: '0 0 22px' }}>
-        <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: '14px', lineHeight: 1.6 }}>
-          <thead>
-            <tr>{b.header.map((c, j) => <th key={j} style={{ ...cell, background: pal.card, fontWeight: 600, color: pal.ink }}><Inline text={c} onWiki={onWiki} /></th>)}</tr>
-          </thead>
-          <tbody>
-            {b.rows.map((r, k) => (
-              <tr key={k}>{b.header.map((_, j) => <td key={j} style={{ ...cell, color: pal.body }}><Inline text={r[j] ?? ''} onWiki={onWiki} /></td>)}</tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    );
+    return <EditableTable block={b} pal={pal} doc={doc} onDocChange={onDocChange} spellCheck={spellCheck} />;
   }
   if (b.t === 'list') {
     return (
@@ -156,53 +234,19 @@ function RenderedBlock({ b, pal, doc, onDocChange, onWiki, images = {}, onDelete
   return null;
 }
 
-function generateBibliography(docText, references) {
-  const regex = /\[@([a-zA-Z0-9_-]+)\]/g;
-  const citationKeys = new Set();
-  let match;
-  while ((match = regex.exec(docText)) !== null) {
-    citationKeys.add(match[1]);
-  }
-  
-  if (citationKeys.size === 0) {
-    alert("No citations (e.g. [@citekey]) found in this note. Write citations first!");
-    return docText;
-  }
-  
-  const formattedRefs = [];
-  for (const key of citationKeys) {
-    const ref = references.find(r => r.citationKey === key);
-    if (ref) {
-      const authorStr = ref.authors && ref.authors.length > 0
-        ? (ref.authors.length > 1 
-            ? ref.authors.slice(0, -1).join(', ') + ' & ' + ref.authors[ref.authors.length - 1] 
-            : ref.authors[0])
-        : 'Unknown Author';
-      const yearStr = ref.year ? ` (${ref.year})` : ' (n.d.)';
-      const titleStr = ref.title ? ` *${ref.title.trim()}*` : '';
-      const journalStr = ref.journal ? `, ${ref.journal.trim()}` : '';
-      const urlStr = ref.url ? ` [Source](${ref.url})` : '';
-      formattedRefs.push(`- **${key}**: ${authorStr}${yearStr}.${titleStr}${journalStr}.${urlStr}`);
-    } else {
-      formattedRefs.push(`- **${key}**: Reference details not found in vault.`);
-    }
-  }
-  
-  const parts = docText.split(/\n## References/i);
-  const cleanDoc = parts[0].trim();
-  const bibContent = `\n\n## References\n\n` + formattedRefs.join('\n') + '\n';
-  return cleanDoc + bibContent;
-}
-
 export default function Editor({
   note, crumb, doc, files, docs,
   onDocChange, onWiki, onOpen, onRename, onDelete, onInsertSketch, onCreateSketch, onNewNote,
-  spell, grid, paper, accent, sketches, setSketchData,
+  spell, grid, paper, sketches, setSketchData,
   images = {}, setImageData,
   alignTop = false,
   references = [],
+  initialScrollTop = 0,
+  onScroll,
 }) {
+  const scrollRef = useRef(null);
   const taRef = useRef(null);
+  const richRef = useRef(null);
   const imageInputRef = useRef(null);   // hidden file picker for image inserts
   const caretRef = useRef(null);        // caret to apply after (re)focus: number | 'end'
   const draftCaretRef = useRef(null);   // caret to apply after in-draft edits
@@ -213,6 +257,47 @@ export default function Editor({
   const [selIx, setSelIx] = useState(0);
   const [citeMenu, setCiteMenu] = useState(null);
   const [citeIx, setCiteIx] = useState(0);
+  const [bibliographyStyle, setBibliographyStyle] = useState('apa');
+  const [convertingDiagram, setConvertingDiagram] = useState(null); // line0 of the block being converted
+  const [diagramError, setDiagramError] = useState(null);
+
+  // Restore the resumed scroll position. The sheet keeps growing for several
+  // frames after mount — blocks, webfonts, sketch and image embeds all settle
+  // late — and assigning scrollTop before it is tall enough silently clamps to
+  // the current maximum. So retry until it takes, or until the reader moves.
+  useEffect(() => {
+    const target = initialScrollTop;
+    const el = scrollRef.current;
+    if (!target || !el) return undefined;
+
+    let timer = 0;
+    let tries = 0;
+    let abandoned = false;
+    const yieldToReader = () => { abandoned = true; };
+
+    // setTimeout, not requestAnimationFrame: rAF does not fire while the page is
+    // hidden, so a note restored into a background tab would never scroll.
+    const attempt = () => {
+      if (abandoned || !scrollRef.current) return;
+      scrollRef.current.scrollTop = target;
+      // stop as soon as the position sticks; give up after ~500ms of growing
+      if (Math.abs(scrollRef.current.scrollTop - target) > 1 && ++tries < 30) {
+        timer = setTimeout(attempt, 16);
+      }
+    };
+    attempt();
+
+    el.addEventListener('wheel', yieldToReader, { passive: true, once: true });
+    el.addEventListener('touchstart', yieldToReader, { passive: true, once: true });
+    return () => {
+      clearTimeout(timer);
+      el.removeEventListener('wheel', yieldToReader);
+      el.removeEventListener('touchstart', yieldToReader);
+    };
+    // keyed on the note, not on initialScrollTop: re-running as the reader
+    // scrolls would fight them for control of the scroller
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [note?.id]);
 
   const pal = paper ? PAL.paper : PAL.dark;
   const blocks = parseBlocks(doc);
@@ -276,7 +361,13 @@ export default function Editor({
   // apply caret + autosize whenever the active textarea (re)renders
   useEffect(() => {
     const ta = taRef.current;
-    if (!ta) return;
+    if (!ta) {
+      if (richRef.current && caretRef.current != null) {
+        richRef.current.focus();
+        caretRef.current = null;
+      }
+      return;
+    }
     ta.style.height = 'auto';
     ta.style.height = ta.scrollHeight + 'px';
     if (caretRef.current != null) {
@@ -401,6 +492,33 @@ export default function Editor({
     const L = linesOf(doc);
     onDocChange([...L.slice(0, b.line0), ...L.slice(b.line1)].join('\n'));
     setSketchData(b.id, null);
+  };
+
+  /**
+   * Turn a rendered mermaid diagram into a real Excalidraw scene, in place.
+   * The assistant is good at laying a diagram out; hand-editing is where
+   * Excalidraw wins — so this hands the layout over rather than starting blank.
+   */
+  const convertDiagramToSketch = async (b) => {
+    if (convertingDiagram !== null) return;
+    setConvertingDiagram(b.line0);
+    setDiagramError(null);
+    try {
+      // only the mermaid parser is worth code-splitting; excalidraw is already
+      // in the main graph via SketchCanvas, so importing it lazily buys nothing
+      const { parseMermaidToExcalidraw } = await import('@excalidraw/mermaid-to-excalidraw');
+      const { elements, files } = await parseMermaidToExcalidraw(String(b.text || '').trim());
+      const scene = { elements: convertToExcalidrawElements(elements), files: files ?? {} };
+      if (!scene.elements.length) throw new Error('That diagram produced no shapes.');
+      const skId = onCreateSketch();
+      setSketchData(skId, scene);
+      if (focus) { setFocus(null); setSlash(null); }
+      onDocChange(replaceBlockWithSketchFence(doc, b, skId));
+    } catch (e) {
+      setDiagramError(diagramErrorMessage(e));
+    } finally {
+      setConvertingDiagram(null);
+    }
   };
 
   /** Remove an image block and purge its bytes from the vault. */
@@ -558,7 +676,12 @@ export default function Editor({
 
   const handleGenBibliography = () => {
     const currentText = focus ? draft : doc;
-    const newText = generateBibliography(currentText, references);
+    const result = generateBibliography(currentText, references, bibliographyStyle);
+    if (!result.cited) {
+      alert('No citations (for example [@citekey]) were found in this note. Add citations first.');
+      return;
+    }
+    const newText = result.text;
     if (newText !== currentText) {
       if (focus) {
         setDraft(newText);
@@ -682,7 +805,18 @@ export default function Editor({
 
   const editorNode = (b) => (
     <div key="editor" style={{ position: 'relative' }}>
-      <textarea
+      {b?.t === 'p' && /\[\[[^\]]+\]\]/.test(draft) ? (
+        <FriendlyWikilinkEditor
+          value={draft}
+          style={editStyleFor(b)}
+          spellCheck={spell}
+          editorRef={richRef}
+          onChange={setDraft}
+          onBlur={() => setTimeout(() => {
+            if (document.activeElement !== richRef.current) commitBlur();
+          }, 90)}
+        />
+      ) : <textarea
         ref={taRef}
         className="blk-ta"
         rows={1}
@@ -704,7 +838,7 @@ export default function Editor({
           if (ae !== taRef.current && !(ae && ae.closest && (ae.closest('.slash-menu') || ae.closest('.cite-menu')))) commitBlur();
         }, 90)}
         style={editStyleFor(b)}
-      />
+      />}
       {slash && filtered.length > 0 && (
         <div className="slash-menu" style={{
           position: 'absolute', top: slash.y + 'px', left: `min(${slash.x}px, calc(100% - 250px))`,
@@ -790,13 +924,17 @@ export default function Editor({
       <div
         key={b.t + '-' + b.line0}
         onMouseDown={(e) => {
-          if (e.target.closest('a, [data-cb]')) return;
+          if (e.target.closest('a, [data-cb], [data-table-cell], [data-table-control], [data-diagram-control]')) return;
           e.preventDefault();
           navTo(b, 'end');
         }}
         style={{ cursor: 'text' }}
       >
-        <RenderedBlock b={b} pal={pal} doc={doc} onDocChange={onDocChange} onWiki={onWiki} images={images} onDeleteImage={deleteImageBlock} />
+        <RenderedBlock
+          b={b} pal={pal} doc={doc} onDocChange={onDocChange} onWiki={onWiki}
+          images={images} onDeleteImage={deleteImageBlock} spellCheck={spell}
+          onConvertDiagram={convertDiagramToSketch} convertingDiagram={convertingDiagram}
+        />
       </div>,
     );
   });
@@ -808,11 +946,14 @@ export default function Editor({
   const iconBtn = { width: '26px', height: '26px', borderRadius: '6px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: pal.muted };
 
   // on paper, the accent gets inked-down so amber stays readable on cream
-  const sheetVars = paper ? { '--acc': `color-mix(in oklab, ${accent} 62%, #3d2f05)` } : {};
+  // on paper the accent becomes --acc-page, the lamp's darkened-for-cream variant
+  const sheetVars = paper ? { '--acc': 'var(--acc-page)' } : {};
 
   return (
     <div
+      ref={scrollRef}
       style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}
+      onScroll={(e) => onScroll?.(e.currentTarget.scrollTop)}
       onDragOver={(e) => { if (e.dataTransfer?.types?.includes('Files')) e.preventDefault(); }}
       onDrop={onSheetDrop}
     >
@@ -826,7 +967,7 @@ export default function Editor({
         style={paper ? {
           // in split view the sheet's top edge lines up with the PDF page (44px toolbar + 26px gap)
           maxWidth: '820px', margin: (alignTop ? '70px' : '26px') + ' auto 90px', padding: '42px 52px 26px',
-          background: '#f6f2e7', borderRadius: '18px', position: 'relative', overflow: 'hidden',
+          background: 'var(--page)', borderRadius: 'var(--r-sheet)', position: 'relative', overflow: 'hidden',
           boxShadow: '0 30px 70px -32px rgba(0,0,0,.65), 0 2px 8px rgba(0,0,0,.35)',
           ...sheetVars,
         } : { maxWidth: '700px', margin: (alignTop ? '70px' : '0') + ' auto 0', padding: alignTop ? '0 40px 26px' : '36px 40px 26px' }}
@@ -838,7 +979,13 @@ export default function Editor({
               {crumb} <span style={{ margin: '0 4px' }}>/</span> <span style={{ color: pal.muted }}>{note.name}</span>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '2px' }} onMouseDown={(e) => e.preventDefault()}>
-              <div className={toolCls} title="Generate Bibliography" onClick={handleGenBibliography} style={iconBtn}>
+              <label title="Bibliography style" onMouseDown={(e) => e.stopPropagation()} style={{ display: 'flex', alignItems: 'center', height: '26px', marginRight: '2px', border: `1px solid ${pal.border}`, borderRadius: '6px', padding: '0 5px', background: paper ? 'rgba(255,253,247,.72)' : 'rgba(255,255,255,.025)' }}>
+                <span style={{ color: pal.faint, fontSize: '9px', fontWeight: 700, letterSpacing: '.05em', marginRight: '3px' }}>CITE</span>
+                <select aria-label="Bibliography style" value={bibliographyStyle} onChange={(e) => setBibliographyStyle(e.target.value)} style={{ appearance: 'none', border: 'none', outline: 'none', background: 'transparent', color: pal.muted, cursor: 'pointer', font: '600 10px ui-monospace, SFMono-Regular, Menlo, monospace', padding: 0 }}>
+                  {Object.entries(BIBLIOGRAPHY_STYLES).map(([id, style]) => <option key={id} value={id}>{style.label}</option>)}
+                </select>
+              </label>
+              <div className={toolCls} title={`Generate ${BIBLIOGRAPHY_STYLES[bibliographyStyle].label} bibliography`} onClick={handleGenBibliography} style={iconBtn}>
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M4 6h16M4 10h16M4 14h16M4 18h16" />
                 </svg>
@@ -885,6 +1032,20 @@ export default function Editor({
             ))}
             <span style={{ color: pal.faint }}>{fmtEdited(note.mtime)}</span>
           </div>
+
+          {diagramError && (
+            <div
+              data-diagram-control
+              onMouseDown={(e) => e.stopPropagation()}
+              style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', margin: '0 0 18px', padding: '9px 12px', border: `1px dashed ${pal.border}`, borderRadius: '8px', fontSize: '12px', color: pal.muted }}
+            >
+              <span>Couldn’t turn that diagram into a sketch — {diagramError}</span>
+              <button type="button" data-diagram-control onClick={() => setDiagramError(null)}
+                style={{ border: 'none', background: 'transparent', color: pal.muted, cursor: 'pointer', font: 'inherit', fontSize: '12px' }}>
+                Dismiss
+              </button>
+            </div>
+          )}
 
           {items}
 
