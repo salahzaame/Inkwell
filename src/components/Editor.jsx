@@ -297,7 +297,7 @@ export default function Editor({
     // keyed on the note, not on initialScrollTop: re-running as the reader
     // scrolls would fight them for control of the scroller
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [note.id]);
+  }, [note?.id]);
 
   const pal = paper ? PAL.paper : PAL.dark;
   const blocks = parseBlocks(doc);
