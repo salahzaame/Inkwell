@@ -163,3 +163,43 @@ test('applyLamp normalizes a bad setting instead of writing undefined', () => {
 test('applyLamp is a no-op on a missing element rather than throwing', () => {
   assert.doesNotThrow(() => applyLamp(null, 'dusk'));
 });
+
+/* ── the accent: any choice keeps amber's contrast at every setting ── */
+
+import { ACCENTS, DEFAULT_ACCENT, accentTokens, normalizeAccent } from '../src/lamp.js';
+
+test('amber is the lamp table itself, untouched', () => {
+  for (const lamp of LAMPS) {
+    assert.deepEqual(accentTokens(DEFAULT_ACCENT, lamp), {});
+    assert.equal(lampVars(lamp, DEFAULT_ACCENT)['--acc'], LAMP_TOKENS[lamp]['--acc']);
+  }
+});
+
+test('a stored accent that is not a choice falls back to amber', () => {
+  assert.equal(normalizeAccent('#123456'), DEFAULT_ACCENT);
+  assert.equal(normalizeAccent(undefined), DEFAULT_ACCENT);
+  assert.equal(normalizeAccent('#A78BFA'), '#a78bfa');
+});
+
+test('every accent keeps amber\'s contrast on chrome, on paper, and under button text', () => {
+  for (const lamp of LAMPS) {
+    const t = LAMP_TOKENS[lamp];
+    const amber = { chrome: contrastRatio(t['--acc'], t['--chrome-2']), page: contrastRatio(t['--acc-page'], t['--page']), button: contrastRatio('#17181c', t['--acc']) };
+    for (const { id, hex } of ACCENTS) {
+      const v = lampVars(lamp, hex);
+      const got = { chrome: contrastRatio(v['--acc'], t['--chrome-2']), page: contrastRatio(v['--acc-page'], t['--page']), button: contrastRatio('#17181c', v['--acc']) };
+      for (const k of Object.keys(amber)) {
+        assert.ok(Math.abs(got[k] - amber[k]) < 0.1, `${lamp} ${id} ${k}: ${got[k].toFixed(2)} vs amber ${amber[k].toFixed(2)}`);
+        assert.ok(got[k] >= 4.5, `${lamp} ${id} ${k} fails AA at ${got[k].toFixed(2)}`);
+      }
+    }
+  }
+});
+
+test('the accent is written onto the element with the rest of the lamp', () => {
+  const props = {};
+  const el = { style: { setProperty: (k, v) => { props[k] = v; } }, dataset: {} };
+  applyLamp(el, 'dusk', '#5eead4');
+  assert.equal(props['--acc'], accentTokens('#5eead4', 'dusk')['--acc']);
+  assert.notEqual(props['--acc'], LAMP_TOKENS.dusk['--acc']);
+});

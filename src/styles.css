@@ -734,3 +734,103 @@ textarea::placeholder { color: #4a4f5c; }
   .workspace-pane-note { min-height: 64vh; }
   .split-gutter { display: none; }
 }
+
+/* ── rich note editor (NoteBody.jsx) ──
+   Mirrors the classic editor's rendered blocks exactly, so switching editors
+   changes how notes are edited, not how they look. --ed-* come from the
+   editor's paper / dark palette. */
+.ink-prose { position: relative; }
+.ink-prose .ink-prose-editor { outline: none; min-height: 40vh; padding-bottom: 120px; font-size: 15.5px; line-height: 1.75; color: var(--ed-body); caret-color: var(--acc); }
+.ink-prose p { margin: 0 0 22px; }
+.ink-prose h1, .ink-prose h2, .ink-prose h3 { font-family: var(--ed-head-font); color: var(--ed-ink); letter-spacing: -.01em; }
+.ink-prose h1 { font-size: 27px; font-weight: 700; line-height: 1.4; margin: 0 0 12px; }
+.ink-prose h2 { font-size: 22px; font-weight: 600; line-height: 1.4; margin: 0 0 12px; }
+.ink-prose h3 { font-size: 17.5px; font-weight: 600; line-height: 1.5; margin: 0 0 10px; letter-spacing: 0; }
+.ink-prose strong { color: var(--ed-ink); }
+.ink-prose a { color: var(--acc); border-bottom: 1px solid color-mix(in oklab, var(--acc) 40%, transparent); text-decoration: none; cursor: pointer; }
+.ink-prose code { background: color-mix(in srgb, currentColor 9%, transparent); border: 1px solid color-mix(in srgb, currentColor 12%, transparent); border-radius: 4px; padding: 1px 5px; font-size: .88em; font-family: ui-monospace, Consolas, monospace; }
+.ink-prose hr { border: none; border-top: 1px solid var(--ed-border); margin: 22px 0; }
+.ink-prose hr.ProseMirror-selectednode { border-top-color: var(--acc); }
+
+.ink-prose ul, .ink-prose ol { margin: 0 0 22px; padding-left: 24px; }
+.ink-prose li { padding: 3px 0; line-height: 1.6; }
+.ink-prose li p { margin: 0; }
+.ink-prose li::marker { color: var(--acc); }
+.ink-prose ol > li::marker { font-size: 13px; }
+.ink-prose li > ul, .ink-prose li > ol { margin: 4px 0 0; }
+.ink-prose ul[data-type="taskList"] { list-style: none; padding-left: 0; }
+.ink-prose ul[data-type="taskList"] li { display: flex; align-items: flex-start; gap: 10px; padding: 5px 0; }
+.ink-prose ul[data-type="taskList"] li > label { flex-shrink: 0; margin-top: 3px; user-select: none; }
+.ink-prose ul[data-type="taskList"] li > div { flex: 1; min-width: 0; }
+.ink-prose ul[data-type="taskList"] input[type="checkbox"] { width: 17px; height: 17px; margin: 0; cursor: pointer; accent-color: var(--acc); }
+.ink-prose ul[data-type="taskList"] li[data-checked="true"] > div { color: var(--ed-muted); text-decoration: line-through; }
+
+.ink-prose blockquote { margin: 0 0 22px; padding: 2px 0 2px 14px; border-left: 2.5px solid color-mix(in oklab, var(--acc) 55%, transparent); color: var(--ed-muted); }
+.ink-prose blockquote > p { margin: 0; }
+.ink-prose blockquote > p + p { margin-top: 8px; }
+
+.ink-prose pre.ink-code, .ink-prose pre { background: var(--ed-code-bg); border: 1px solid var(--ed-border); border-radius: 10px; padding: 12px 16px; font-size: 13px; line-height: 1.6; color: var(--ed-body); overflow-x: auto; margin: 0 0 22px; font-family: ui-monospace, Consolas, monospace; white-space: pre; }
+.ink-prose pre code { background: none; border: none; padding: 0; font-size: inherit; }
+.ink-mermaid { margin: 0 0 22px; }
+.ink-mermaid > div > div { margin-bottom: 8px !important; }
+.ink-mermaid-error { font-size: 12px; color: var(--ed-muted); border: 1px dashed var(--ed-border); border-radius: 8px; padding: 8px 12px; margin-bottom: 8px; }
+
+.ink-prose table { border-collapse: collapse; width: 100%; font-size: 14px; line-height: 1.6; margin: 0 0 22px; table-layout: fixed; }
+.ink-prose th, .ink-prose td { border: 1px solid var(--ed-border); padding: 7px 12px; text-align: left; vertical-align: top; position: relative; min-width: 86px; }
+.ink-prose th { background: var(--ed-card); color: var(--ed-ink); font-weight: 600; }
+.ink-prose th > p, .ink-prose td > p { margin: 0; }
+.ink-prose .selectedCell::after { content: ""; position: absolute; inset: 0; background: color-mix(in oklab, var(--acc) 16%, transparent); pointer-events: none; }
+.ink-prose .tableWrapper { overflow-x: auto; }
+
+.ink-prose .ink-figure { margin: 0 0 22px; position: relative; }
+.ink-prose .ink-figure img { max-width: 100%; display: block; border-radius: 10px; border: 1px solid var(--ed-border); box-shadow: 0 3px 14px rgba(0,0,0,.12); }
+.ink-prose .ink-figure figcaption { font-size: 12.5px; color: var(--ed-muted); margin-top: 7px; font-style: italic; }
+.ink-prose .ink-figure-missing { border: 1px dashed var(--ed-border); border-radius: 10px; padding: 26px; text-align: center; font-size: 12.5px; color: var(--ed-muted); }
+.ink-prose .ProseMirror-selectednode.ink-figure img,
+.ink-prose .ProseMirror-selectednode .ink-figure img { outline: 2px solid color-mix(in oklab, var(--acc) 60%, transparent); outline-offset: 2px; }
+
+.ink-prose .ink-wiki { color: var(--acc); border-bottom: 1px solid color-mix(in oklab, var(--acc) 40%, transparent); cursor: pointer; }
+.ink-prose .ink-cite { color: var(--acc); background: color-mix(in oklab, var(--acc) 11%, transparent); border-radius: 4px; padding: 0 4px; font-size: .9em; cursor: default; }
+.ink-prose .ink-cite.is-missing { color: var(--ed-muted); background: color-mix(in srgb, currentColor 8%, transparent); }
+.ink-prose .ProseMirror-selectednode.ink-wiki, .ink-prose .ProseMirror-selectednode.ink-cite { outline: 2px solid color-mix(in oklab, var(--acc) 45%, transparent); border-radius: 4px; }
+.ink-prose .ink-tag { background: color-mix(in oklab, var(--acc) 14%, transparent); color: var(--acc); padding: 1px 7px; border-radius: 99px; font-size: .85em; }
+.ink-prose .ink-raw { font-family: ui-monospace, Consolas, monospace; font-size: .85em; color: var(--ed-muted); }
+
+.ink-prose .ink-prose-editor:focus p.is-empty::before, .ink-prose p.is-editor-empty:first-child::before { content: attr(data-placeholder); color: var(--ed-muted); opacity: .7; float: left; height: 0; pointer-events: none; }
+.ink-prose .ProseMirror-gapcursor::after { border-top-color: var(--ed-ink); }
+.ink-prose ::selection { background: color-mix(in oklab, var(--acc) 28%, transparent); }
+
+/* the selection toolbar */
+.ink-bubble { z-index: 40; background: var(--chrome-2); border: 1px solid var(--line-2); border-radius: 9px; box-shadow: 0 12px 34px rgba(0,0,0,.45); padding: 4px; color: var(--ink-1); font-family: 'Instrument Sans', system-ui, sans-serif; animation: popIn .1s ease-out; }
+.ink-bubble-row { display: flex; align-items: center; gap: 2px; }
+.ink-bubble-btn { display: inline-flex; align-items: center; justify-content: center; gap: 4px; min-width: 30px; height: 30px; padding: 0 8px; border: none; border-radius: 6px; background: transparent; color: var(--ink-1); font: inherit; font-size: 13px; cursor: pointer; white-space: nowrap; }
+.ink-bubble-btn:hover { background: var(--line-2); }
+.ink-bubble-btn.is-on { color: var(--acc); background: color-mix(in oklab, var(--acc) 14%, transparent); }
+.ink-bubble-btn:focus-visible, .ink-bubble-item:focus-visible { outline: 2px solid var(--acc); outline-offset: 1px; }
+.ink-bubble-style { color: var(--ink-2); font-size: 12.5px; }
+.ink-bubble-sep { width: 1px; height: 18px; background: var(--line-2); margin: 0 3px; }
+.ink-bubble-panel { display: flex; flex-direction: column; gap: 1px; margin-top: 4px; padding-top: 4px; border-top: 1px solid var(--line-2); }
+.ink-bubble-item { text-align: left; border: none; background: transparent; color: var(--ink-1); font: inherit; font-size: 13px; padding: 6px 9px; border-radius: 6px; cursor: pointer; }
+.ink-bubble-item:hover { background: var(--line-2); }
+.ink-bubble-item.is-on { color: var(--acc); }
+.ink-bubble-link { flex-direction: row; align-items: center; gap: 4px; }
+.ink-bubble-link input { flex: 1; min-width: 240px; background: var(--chrome-deep); border: 1px solid var(--line-2); border-radius: 6px; padding: 6px 8px; color: var(--ink-1); font: inherit; font-size: 12.5px; outline: none; }
+.ink-bubble-link input:focus { border-color: var(--acc); }
+.ink-mono { font-family: ui-monospace, Consolas, monospace; font-size: 11.5px; }
+
+/* "/", "[[" and "[@" menus */
+.ink-menu { z-index: 45; width: 280px; max-height: 300px; overflow-y: auto; background: var(--chrome-2); border: 1px solid var(--line-2); border-radius: 10px; box-shadow: 0 16px 44px rgba(0,0,0,.55); padding: 5px; color: var(--ink-1); font-family: 'Instrument Sans', system-ui, sans-serif; animation: popIn .1s ease-out; }
+.ink-menu-title { font-size: 10.5px; font-weight: 600; letter-spacing: .5px; text-transform: uppercase; color: var(--ink-2); padding: 5px 9px 4px; }
+.ink-menu-item { display: flex; align-items: center; gap: 10px; padding: 6px 9px; border-radius: 7px; cursor: pointer; font-size: 13px; }
+.ink-menu-item.is-active { background: var(--line-2); }
+.ink-menu-glyph { width: 26px; height: 26px; border-radius: 6px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; background: var(--chrome-deep); border: 1px solid var(--line-2); font-size: 11px; font-weight: 600; color: var(--ink-2); font-family: ui-monospace, Consolas, monospace; }
+.ink-menu-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ink-menu-hint { font-size: 10.5px; color: var(--ink-2); font-family: ui-monospace, Consolas, monospace; }
+.ink-menu-cite { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.ink-menu-cite b { color: var(--acc); font-weight: 600; }
+.ink-menu-sub { font-size: 11px; color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* the table toolbar, anchored above the table the caret is in */
+.ink-table-bar .ink-bubble-btn { font-size: 12px; height: 28px; padding: 0 8px; color: var(--ink-2); }
+.ink-table-bar .ink-bubble-btn:hover { color: var(--ink-1); }
+.ink-table-bar .ink-bubble-btn.is-danger:hover { color: #f87171; background: color-mix(in oklab, #f87171 14%, transparent); }

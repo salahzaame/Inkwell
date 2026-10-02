@@ -21,7 +21,11 @@ let renderSeq = 0;
  * Falls back to the source text when the diagram will not parse — a half-typed
  * diagram should never blank out part of a note.
  */
-export default function MermaidDiagram({ text, pal, onConvertToSketch, converting }) {
+/**
+ * `onSourceToggle` (rich editor) replaces the read-only "Show source" with the
+ * editor's own editable source, labelled by `sourceLabel`.
+ */
+export default function MermaidDiagram({ text, pal, onConvertToSketch, converting, onSourceToggle, sourceLabel }) {
   const [svg, setSvg] = useState('');
   const [error, setError] = useState(null);
   const [showSource, setShowSource] = useState(false);
@@ -66,9 +70,14 @@ export default function MermaidDiagram({ text, pal, onConvertToSketch, convertin
         <div style={{ fontSize: '11.5px', color: pal.muted, marginBottom: '8px' }}>
           Diagram won’t render — {error}
         </div>
-        <pre style={{ margin: 0, fontSize: '13px', lineHeight: 1.6, color: pal.body, overflowX: 'auto', fontFamily: 'ui-monospace, Consolas, monospace' }}>
-          {text}
-        </pre>
+        {/* the rich editor shows the editable source itself */}
+        {onSourceToggle ? (
+          <button type="button" data-diagram-control onClick={(e) => { e.stopPropagation(); onSourceToggle(); }} style={btn}>{sourceLabel}</button>
+        ) : (
+          <pre style={{ margin: 0, fontSize: '13px', lineHeight: 1.6, color: pal.body, overflowX: 'auto', fontFamily: 'ui-monospace, Consolas, monospace' }}>
+            {text}
+          </pre>
+        )}
       </div>
     );
   }
@@ -93,11 +102,11 @@ export default function MermaidDiagram({ text, pal, onConvertToSketch, convertin
           </button>
         )}
         <button type="button" data-diagram-control
-          onClick={(e) => { e.stopPropagation(); setShowSource(s => !s); }} style={btn}>
-          {showSource ? 'Hide source' : 'Show source'}
+          onClick={(e) => { e.stopPropagation(); if (onSourceToggle) onSourceToggle(); else setShowSource(s => !s); }} style={btn}>
+          {onSourceToggle ? sourceLabel : showSource ? 'Hide source' : 'Show source'}
         </button>
       </div>
-      {showSource && (
+      {showSource && !onSourceToggle && (
         <pre data-diagram-control style={{ margin: '10px 0 0', padding: '10px 12px', background: pal.codeBg, borderRadius: '8px', fontSize: '12.5px', lineHeight: 1.6, color: pal.body, overflowX: 'auto', fontFamily: 'ui-monospace, Consolas, monospace' }}>
           {text}
         </pre>

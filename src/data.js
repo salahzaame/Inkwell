@@ -50,7 +50,6 @@ export function buildInitialSketches() {
 }
 
 export const COLORS = { white: '#e8eaf0', violet: '#a78bfa', teal: '#5eead4', amber: '#fbbf24', red: '#f87171' };
-export const ACCENTS = ['#a78bfa', '#5eead4', '#fbbf24', '#f472b6'];
 
 export const INITIAL_MSGS = [
   { role: 'a', text: 'Hi — ask me about your vault. I can see your notes, with the open one in full detail.' },

@@ -2,7 +2,7 @@ import { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState }
 import {
   INITIAL_FILES, INITIAL_DOCS, INITIAL_MSGS, buildInitialSketches, legacySketchToScene,
 } from './data.js';
-import { askAssistant, buildVaultContext, proposeNoteEdits } from './assistant.js';
+import { askAssistant, buildVaultContext, describeProviderFailures, proposeNoteEdits } from './assistant.js';
 import { EDIT_TOOLS_PROMPT, applyProposal, parseEditProposals } from './assistant-edits.js';
 import { parseBlocks, stripInline, extractWikiNames } from './markdown.jsx';
 import { loadHighlightStore, findHighlight, paperIdOf } from './highlights.js';
@@ -175,9 +175,9 @@ export default function App() {
 
   // before paint, so the room is never briefly the wrong colour
   useLayoutEffect(() => {
-    applyLamp(document.documentElement, lamp);
+    applyLamp(document.documentElement, lamp, theme.accent);
     try { localStorage.setItem('inkwell.lamp', lamp); } catch { /* private mode */ }
-  }, [lamp]);
+  }, [lamp, theme.accent]);
 
   useEffect(() => {
     localStorage.setItem('inkwell:references', JSON.stringify(references));
@@ -671,10 +671,10 @@ export default function App() {
       const { text: reply, provider } = await askAssistant({ history, vault, preferLocal: settings.localAi, settings });
       setAiProvider(provider);
       setAiMessages(m => [...m, { role: 'a', text: reply, canApply: true, canReplace }]);
-    } catch {
+    } catch (e) {
       setAiMessages(m => [...m, {
         role: 'a',
-        text: 'I couldn\'t reach a model. Check your internet connection — or run Ollama with a model pulled (e.g. "ollama pull gemma4:12b") and enable "Local assistant" in Settings.',
+        text: describeProviderFailures(e),
       }]);
     } finally {
       setAiTyping(false);
@@ -711,8 +711,8 @@ export default function App() {
         proposals: proposals.map((proposal, i) => ({ id: `${Date.now().toString(36)}-${i}`, proposal, state: 'pending' })),
         skipped,
       }]);
-    } catch {
-      setAiMessages(m => [...m, { role: 'a', text: 'I couldn\'t reach a model to draft those changes. Check your connection, or run Ollama locally and enable "Local assistant" in Settings.' }]);
+    } catch (e) {
+      setAiMessages(m => [...m, { role: 'a', text: describeProviderFailures(e) }]);
     } finally {
       setAiTyping(false);
     }
@@ -874,6 +874,7 @@ export default function App() {
         onCreateSketch={createSketch}
         onNewNote={newNote}
         spell={settings.spell} grid={theme.grid} paper={theme.paper}
+        richEditor={settings.richEditor !== false}
         sketches={sketches} setSketchData={setSketchData}
         images={images} setImageData={setImageData}
         initialScrollTop={restored.noteId === activeFile ? restored.scrollTop : 0}
