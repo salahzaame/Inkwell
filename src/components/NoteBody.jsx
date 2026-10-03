@@ -18,7 +18,8 @@ import Suggestion from '@tiptap/suggestion';
 import CodeBlock from '@tiptap/extension-code-block';
 import { Placeholder } from '@tiptap/extensions';
 import { convertToExcalidrawElements } from '@excalidraw/excalidraw';
-import { Citation, NoteImage, Sketch, Wikilink, noteExtensions } from '../editor/note-schema.js';
+import { Citation, NoteBlockMath, NoteImage, NoteInlineMath, Sketch, Wikilink, noteExtensions } from '../editor/note-schema.js';
+import { renderMath } from '../math.js';
 import { MERMAID_SNIPPET, diagramErrorMessage } from '../diagrams.js';
 import SketchCanvas from './SketchCanvas.jsx';
 import MermaidDiagram from './MermaidDiagram.jsx';
@@ -129,6 +130,78 @@ function CodeBlockView({ node, editor, getPos }) {
     </NodeViewWrapper>
   );
 }
+
+/**
+ * A formula, $x$ inline or $$x$$ as a block: rendered by KaTeX, its LaTeX one
+ * click away. A new, empty formula opens straight into its source.
+ */
+function MathNodeView({ node, updateAttributes, deleteNode, editor, getPos, extension }) {
+  const display = extension.name === 'blockMath';
+  const [draft, setDraft] = useState(null); // null while showing the rendered formula
+  const editing = draft !== null || !node.attrs.latex;
+  const source = draft ?? node.attrs.latex;
+  // Enter commits and refocuses the editor, which blurs the box: commit once
+  const closed = useRef(false);
+  if (editing) closed.current = false;
+
+  const commit = () => {
+    if (closed.current) return;
+    closed.current = true;
+    const latex = source.trim();
+    setDraft(null);
+    if (!latex) { deleteNode(); return; }
+    if (latex !== node.attrs.latex) updateAttributes({ latex });
+    // caret just after the formula, so writing carries on where it stood
+    const after = getPos() + node.nodeSize;
+    editor.chain().focus().setTextSelection(Math.min(after, editor.state.doc.content.size)).run();
+  };
+  const cancel = () => {
+    if (closed.current) return;
+    closed.current = true;
+    setDraft(null);
+    if (!node.attrs.latex) deleteNode();
+    else editor.commands.focus();
+  };
+
+  return (
+    <NodeViewWrapper as={display ? 'div' : 'span'} className={display ? 'ink-math-node is-block' : 'ink-math-node'} contentEditable={false}>
+      {editing ? (
+        <span className="ink-math-edit">
+          <textarea
+            autoFocus
+            rows={display ? Math.max(2, source.split('\n').length) : 1}
+            value={source}
+            placeholder={display ? 'LaTeX, e.g. W = W_0 + BA' : 'LaTeX, e.g. x^2'}
+            spellCheck={false}
+            onChange={(e) => setDraft(e.target.value)}
+            onBlur={commit}
+            onKeyDown={(e) => {
+              // Enter finishes; Shift+Enter breaks a line in a display formula
+              if (e.key === 'Enter' && !(display && e.shiftKey)) { e.preventDefault(); commit(); }
+              if (e.key === 'Escape') { e.preventDefault(); cancel(); }
+            }}
+          />
+          {source.trim() && <span className="ink-math-preview" dangerouslySetInnerHTML={{ __html: renderMath(source, display) }} />}
+        </span>
+      ) : (
+        <span
+          className="ink-math-render" title="Click to edit the formula"
+          // mousedown, not click: ProseMirror redraws the node between press and
+          // release, and the browser then never fires a click on it
+          onMouseDown={(e) => { if (!editor.isEditable || e.button !== 0) return; e.preventDefault(); setDraft(node.attrs.latex); }}
+          dangerouslySetInnerHTML={{ __html: renderMath(node.attrs.latex, display) }}
+        />
+      )}
+    </NodeViewWrapper>
+  );
+}
+
+// the source box takes its own keys, and a press on the formula opens it:
+// ProseMirror must not act on either as well
+const ownKeys = {
+  stopEvent: ({ event }) => /^(INPUT|TEXTAREA)$/.test(event.target?.tagName)
+    || (event.type === 'mousedown' && !!event.target?.closest?.('.ink-math-render')),
+};
 
 /* ── #tags: styled where they stand, still plain text in the markdown ── */
 
@@ -306,6 +379,7 @@ function slashItems({ onCreateSketch, onPickImage }) {
     { id: 'table', label: 'Table', glyph: '⊞', run: block(c => c.insertTable({ rows: 3, cols: 3, withHeaderRow: true })) },
     { id: 'quote', label: 'Quote', glyph: '❝', run: block(c => c.toggleBlockquote()) },
     { id: 'code', label: 'Code block', glyph: '</>', run: block(c => c.setCodeBlock()) },
+    { id: 'math', label: 'Formula (LaTeX)', glyph: '∑', run: block(c => c.insertContent({ type: 'blockMath', attrs: { latex: '' } })) },
     { id: 'diagram', label: 'Diagram (Mermaid)', glyph: '◈', run: block(c => c.insertContent({ type: 'codeBlock', attrs: { language: 'mermaid' }, content: [{ type: 'text', text: MERMAID_BODY }] })) },
     { id: 'divider', label: 'Divider', glyph: '—', run: block(c => c.setHorizontalRule()) },
     { id: 'sketch', label: 'Sketch (Excalidraw)', glyph: '✎', run: block(c => c.insertContent({ type: 'sketch', attrs: { id: onCreateSketch() } })) },
@@ -514,6 +588,8 @@ export default function NoteBody({
       // Excalidraw owns every event inside its canvas
       sketch: Sketch.extend({ addNodeView: () => ReactNodeViewRenderer(SketchView, { stopEvent: () => true }) }),
       codeBlock: CodeBlock.extend({ addNodeView: () => ReactNodeViewRenderer(CodeBlockView) }),
+      inlineMath: NoteInlineMath.extend({ addNodeView: () => ReactNodeViewRenderer(MathNodeView, ownKeys) }),
+      blockMath: NoteBlockMath.extend({ addNodeView: () => ReactNodeViewRenderer(MathNodeView, ownKeys) }),
       extra: [
         Placeholder.configure({ placeholder: placeholder || 'Type "/" for blocks, or just write…' }),
         TagHighlight,

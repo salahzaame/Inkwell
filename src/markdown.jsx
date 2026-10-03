@@ -1,11 +1,24 @@
 // Minimal markdown engine for Inkwell notes.
 // Supported: # ## ### headings, paragraphs, - / 1. lists, - [ ] tasks, > quotes,
 // --- rules, ``` code fences, ```sketch <id> embeds, and inline **bold**, *italic*,
-// `code`, [text](url), [[wikilinks]], #tags.
+// `code`, [text](url), [[wikilinks]], #tags, $math$ (and $$ display math via parseBlocks).
+
+import { INLINE_MATH_SOURCE, renderMath } from './math.js';
 
 export { parseBlocks } from './blocks.js';
 
-const INLINE_RX = /(\[\[[^\]]+\]\])|(\*\*[^*]+\*\*)|(\*[^*]+\*)|(`[^`]+`)|(\[[^\]]+\]\([^)]+\))|((?:^|(?<=\s))#[\w][\w/-]*)/g;
+const INLINE_RX = new RegExp(
+  /(\[\[[^\]]+\]\])|(\*\*[^*]+\*\*)|(\*[^*]+\*)|(`[^`]+`)|(\[[^\]]+\]\([^)]+\))|((?:^|(?<=\s))#[\w][\w/-]*)/.source
+    // $$display$$ mid-text (assistant replies); in notes parseBlocks takes $$ lines first
+    + String.raw`|(\$\$([^$]+?)\$\$)`
+    + `|(${INLINE_MATH_SOURCE})`,
+  'g',
+);
+
+/** A KaTeX-rendered formula; `display` for a $$ one. A span either way: it may sit inside a <p>. */
+export function MathView({ tex, display = false, style }) {
+  return <span className={display ? 'ink-math-block' : 'ink-math'} style={style} dangerouslySetInnerHTML={{ __html: renderMath(tex, display) }} />;
+}
 
 const TAG_STYLE = {
   background: 'color-mix(in oklab, var(--acc) 14%, transparent)', color: 'var(--acc)',
@@ -55,6 +68,8 @@ export function Inline({ text, onWiki }) {
         out.push(<a key={k++} href={lm[2]} target="_blank" rel="noreferrer" style={LINK_STYLE}>{lm[1]}</a>);
       }
     } else if (m[6]) out.push(<span key={k++} style={TAG_STYLE}>{s}</span>);
+    else if (m[7]) out.push(<MathView key={k++} tex={m[8].trim()} display />);
+    else if (m[9]) out.push(<MathView key={k++} tex={m[10]} />);
     last = m.index + s.length;
   }
   if (last < (text || '').length) out.push(text.slice(last));

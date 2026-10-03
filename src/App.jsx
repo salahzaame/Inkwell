@@ -24,6 +24,7 @@ import QuickSwitcher from './components/QuickSwitcher.jsx';
 import SettingsModal from './components/SettingsModal.jsx';
 import StatusBar from './components/StatusBar.jsx';
 import WorkspaceSplit from './components/WorkspaceSplit.jsx';
+import 'katex/dist/katex.min.css';
 
 // These packages pull in PDF.js, Cytoscape, Excalidraw rendering, and the deck runtime.
 // Keep the core note workspace responsive; each capability loads only when opened.
@@ -339,14 +340,23 @@ export default function App() {
   };
 
   /** A fresh highlight lands in the store AND as a quote block in the paper's note. */
-  const addHighlight = (hl) => {
+  // A clip (a formula or figure boxed on the page) arrives with its picture and
+  // lands as an image; the picture lives in the vault, not the highlight store.
+  const addHighlight = ({ image, ...hl }) => {
     if (!activePdf) return;
     const pid = activePdf.paperId;
     setHighlights(s => ({ ...s, [pid]: [...(s[pid] || []), hl] }));
     const noteId = ensurePaperNote(activePdf);
-    const quoteText = hl.text.length > 420 ? hl.text.slice(0, 417) + '…' : hl.text;
     const label = activePdf.citationKey ? `@${activePdf.citationKey}, p. ${hl.page}` : `p. ${hl.page}`;
-    const block = `\n> "${quoteText}"\n> — [${label}](hl://${hl.id})\n`;
+    let block;
+    if (image) {
+      const imgId = newImageId();
+      setImageData(imgId, image);
+      block = `\n![](img:${imgId})\n\n— [${label}](hl://${hl.id})\n`;
+    } else {
+      const quoteText = hl.text.length > 420 ? hl.text.slice(0, 417) + '…' : hl.text;
+      block = `\n> "${quoteText}"\n> — [${label}](hl://${hl.id})\n`;
+    }
     setDocs(d => ({ ...d, [noteId]: (d[noteId] ?? '').replace(/\n*$/, '\n') + block }));
     setFiles(f => f.map(x => (x.id === noteId ? { ...x, mtime: Date.now() } : x)));
     setOpenTabs(t => (t.includes(noteId) ? t : [...t, noteId]));

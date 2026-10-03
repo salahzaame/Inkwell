@@ -7,8 +7,10 @@ function isTableStart(lines, i) {
   return /^\s*\|.*\|\s*$/.test(lines[i] || '') && i + 1 < lines.length && /^\s*\|[\s:|-]+\|\s*$/.test(lines[i + 1]);
 }
 
+import { matchBlockMath } from './math.js';
+
 // lines that end a running paragraph because they open a block of their own
-const BLOCK_START_RX = /^(#{1,3}\s|```|>\s?|---+\s*$|!\[|\s*([-*]|\d+\.)\s+)/;
+const BLOCK_START_RX = /^(#{1,3}\s|```|\$\$|>\s?|---+\s*$|!\[|\s*([-*]|\d+\.)\s+)/;
 
 export function parseBlocks(text) {
   const lines = (text || '').split('\n');
@@ -35,6 +37,13 @@ export function parseBlocks(text) {
       while (i < lines.length && !/^```/.test(lines[i])) { buf.push(lines[i]); i++; }
       i++; // closing fence
       push(m ? { t: 'sketch', id: m[1] } : { t: 'code', lang, text: buf.join('\n') }, start);
+      continue;
+    }
+    // a display formula, $$x$$ on one line or $$ / lines / $$
+    const math = /^\$\$/.test(l) ? matchBlockMath(lines.slice(i).join('\n')) : null;
+    if (math) {
+      i += math.raw.replace(/\n$/, '').split('\n').length;
+      push({ t: 'math', tex: math.latex }, start);
       continue;
     }
     const h = l.match(/^(#{1,3})\s+(.*)$/);

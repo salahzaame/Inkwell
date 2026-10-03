@@ -11,15 +11,19 @@
 //   [@citekey]               citation   inline atom, feeds the bibliography
 //   ![caption](img:id)       noteImage  block, bytes live in the vault
 //   ```sketch id ```         sketch     block atom, an Excalidraw scene
+//   $x^2$                    inlineMath inline atom, KaTeX (grammar in src/math.js)
+//   $$ ... $$                blockMath  block atom, a display formula
 //
 // Kept free of JSX and React so `node --test` can round-trip real notes; the
 // editor component attaches its node views with `.extend({ addNodeView })`.
 
-import { InputRule, Node, mergeAttributes, nodePasteRule } from '@tiptap/core';
+import { Extension, InputRule, Node, mergeAttributes, nodePasteRule } from '@tiptap/core';
 import StarterKit from '@tiptap/starter-kit';
 import { Markdown } from '@tiptap/markdown';
 import { TaskItem, TaskList } from '@tiptap/extension-list';
 import { TableKit } from '@tiptap/extension-table';
+import { BlockMath, InlineMath } from '@tiptap/extension-mathematics';
+import { INLINE_MATH_SOURCE, blockMathMarkdown, matchBlockMath, matchInlineMath } from '../math.js';
 
 /**
  * Replace the whole typed match with an inline atom. TipTap's nodeInputRule
@@ -165,6 +169,73 @@ export const InlineImage = Node.create({
   renderMarkdown: node => `![${node.attrs?.alt ?? ''}](${node.attrs?.src ?? ''})`,
 });
 
+// TipTap's math nodes, with Inkwell's grammar in place of their own: theirs
+// reads "$5 and $10" as a formula and rewrites a one-line $$x$$ over three lines.
+export const NoteInlineMath = InlineMath.extend({
+  markdownTokenizer: {
+    name: 'inlineMath',
+    level: 'inline',
+    start: src => src.indexOf('$'),
+    tokenize(src) {
+      const m = matchInlineMath(src);
+      if (m) return { type: 'inlineMath', raw: m[0], latex: m[1] };
+      return undefined;
+    },
+  },
+  renderMarkdown: node => `$${node.attrs?.latex ?? ''}$`,
+  // typing the closing $ of "$x^2$" makes the formula, as it would read back
+  addInputRules() {
+    return [
+      ...(this.parent?.() ?? []),
+      new InputRule({
+        find: new RegExp(INLINE_MATH_SOURCE + '$'),
+        handler: ({ state, range, match }) => {
+          state.tr.replaceWith(range.from, range.to, this.type.create({ latex: match[1] }));
+        },
+      }),
+    ];
+  },
+});
+
+export const NoteBlockMath = BlockMath.extend({
+  addAttributes() {
+    return {
+      ...this.parent?.(),
+      // how the source wrote it, so the round trip keeps $$x$$ on one line
+      oneLine: { default: false, rendered: false },
+    };
+  },
+  markdownTokenizer: {
+    name: 'blockMath',
+    level: 'block',
+    start: src => src.search(/^\$\$/m),
+    tokenize(src) {
+      const m = matchBlockMath(src);
+      if (m) return { type: 'blockMath', ...m };
+      return undefined;
+    },
+  },
+  parseMarkdown: (token, h) => h.createNode('blockMath', { latex: token.latex, oneLine: token.oneLine }),
+  renderMarkdown: node => blockMathMarkdown(node.attrs?.latex ?? '', node.attrs?.oneLine),
+});
+
+/** Backslash the opening $ of anything in plain text that would read back as math. */
+export const escapeMathDollars = text => text.replace(new RegExp(INLINE_MATH_SOURCE, 'g'), m => '\\' + m);
+
+// Text the reader typed as "$a$" (or loaded as "\$a$") is not a formula, and
+// must not become one when the note is saved and reopened. TipTap's serializer
+// escapes * _ ` [ ] ~ in text but not $, so add it, only where it matters.
+const MathSafeText = Extension.create({
+  name: 'mathSafeText',
+  // before, not on, create: TipTap emits create on a timer, after a first save
+  onBeforeCreate() {
+    const manager = this.editor.markdown;
+    if (!manager?.escapeMarkdownSyntax) return;
+    const escape = manager.escapeMarkdownSyntax.bind(manager);
+    manager.escapeMarkdownSyntax = text => escapeMathDollars(escape(text));
+  },
+});
+
 /**
  * Every extension the note editor uses. `overrides` swaps in node-view-bearing
  * versions from the React component, by name, without changing the schema.
@@ -189,8 +260,11 @@ export function noteExtensions(overrides = {}) {
     pick(Citation),
     pick(NoteImage),
     pick(Sketch),
+    pick(NoteInlineMath),
+    pick(NoteBlockMath),
     InlineImage,
     Markdown,
+    MathSafeText,
     ...(overrides.extra ?? []),
   ];
 }

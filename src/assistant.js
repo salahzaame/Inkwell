@@ -14,6 +14,7 @@ function systemPrompt(vault) {
     'When you reference a note, call it by its exact name in double brackets, e.g. [[Weekly Sync]].',
     'If the user asks you to write or draft content, produce clean markdown they can paste into a note. Do not invent papers, quotations, statistics, or citations that are not in the workspace.',
     'Inkwell renders ```mermaid code fences as real diagrams inside notes, and the reader can convert one into an editable Excalidraw sketch. So when asked to draw, diagram, visualise, or map something — a flowchart, architecture, process, timeline, causal chain, or relationship — answer with a ```mermaid fence. Never say you cannot draw, and never suggest pasting the code elsewhere. Keep the diagram to roughly 12 nodes and use flowchart/sequence/state/ER syntax that mermaid 11 accepts.',
+    'Inkwell renders LaTeX math: write inline formulas as $...$ and display formulas as $$...$$ on lines of their own. Never use \\( \\) or \\[ \\] delimiters, and never write formulas as plain text when they are math.',
     'When asked to explain, match the requested level (plain-language or technical) and tie the explanation back to the open note, active slide, or relevant paper when possible.',
     '',
     vault,
@@ -63,7 +64,8 @@ export function buildVaultContext(files, docs, activeId, { references = [], high
     research.push('', `RESEARCH LIBRARY (${references.length} papers):`);
     for (const ref of references.slice(0, 20)) {
       const paperId = ref.citationKey || ref.url || (ref.title ? 'local:' + ref.title : null);
-      const paperHighlights = highlights[paperId] || [];
+      // clipped formulas and figures are pictures: no text to quote
+      const paperHighlights = (highlights[paperId] || []).filter(h => h.text);
       research.push(
         `--- ${ref.title || 'Untitled paper'} ---`,
         `Status: ${ref.status || 'toread'}${ref.year ? ` · ${ref.year}` : ''}${ref.citationKey ? ` · [@${ref.citationKey}]` : ''}`,

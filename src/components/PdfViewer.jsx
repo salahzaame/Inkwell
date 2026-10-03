@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { getDocument, GlobalWorkerOptions, TextLayer } from 'pdfjs-dist';
+import { getDocument, GlobalWorkerOptions, normalizeUnicode, TextLayer } from 'pdfjs-dist';
 import { MARKERS, newHighlightId } from '../highlights.js';
 import { buildPdfExcerptPrompt } from '../pdf-prompts.js';
 
@@ -20,7 +20,36 @@ function dedupeRects(rects) {
   )));
 }
 
-function PdfPage({ doc, pageNum, baseW, baseH, scale, visible, hls, flashId, registerEl, onPageClick }) {
+/**
+ * Render one region of a page (fractions of the page box) as an image, at print
+ * resolution rather than screen: a formula clipped into a note stays sharp.
+ * PNG keeps thin strokes and sub/superscripts crisp; WebP only for large areas.
+ */
+async function renderClip(doc, pageNum, r) {
+  const page = await doc.getPage(pageNum);
+  const base = page.getViewport({ scale: 1 });
+  const viewport = page.getViewport({ scale: Math.min(3, 2000 / Math.max(1, r.w * base.width)) });
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.max(1, Math.round(r.w * viewport.width));
+  canvas.height = Math.max(1, Math.round(r.h * viewport.height));
+  await page.render({
+    canvasContext: canvas.getContext('2d'),
+    viewport,
+    transform: [1, 0, 0, 1, -r.x * viewport.width, -r.y * viewport.height],
+    intent: 'print',
+  }).promise;
+  const png = canvas.toDataURL('image/png');
+  if (png.length < 450_000) return png;
+  const webp = canvas.toDataURL('image/webp', 0.92);
+  return webp.startsWith('data:image/webp') ? webp : png;
+}
+
+/** The box being dragged in clip mode, as a page-fraction rect. */
+const clipRectOf = ({ x0, y0, x1, y1 }) => ({
+  x: Math.min(x0, x1), y: Math.min(y0, y1), w: Math.abs(x1 - x0), h: Math.abs(y1 - y0),
+});
+
+function PdfPage({ doc, pageNum, baseW, baseH, scale, visible, hls, flashId, registerEl, onPageClick, clip }) {
   const canvasRef = useRef(null);
   const textRef = useRef(null);
 
@@ -56,6 +85,11 @@ function PdfPage({ doc, pageNum, baseW, baseH, scale, visible, hls, flashId, reg
           viewport,
         });
         await textLayer.render();
+        if (cancelled) return;
+        // as pdf.js's own viewer does: see .endOfContent in styles.css
+        const end = document.createElement('div');
+        end.className = 'endOfContent';
+        textDiv.append(end);
       } catch (err) {
         if (err?.name !== 'RenderingCancelledException' && !cancelled) {
           console.error('pdf page render failed', pageNum, err);
@@ -81,16 +115,23 @@ function PdfPage({ doc, pageNum, baseW, baseH, scale, visible, hls, flashId, reg
         {hls.map(hl => hl.rects.filter(r => r.page === pageNum).map((r, i) => (
           <div
             key={hl.id + i}
-            className={'pdf-hl' + (flashId === hl.id ? ' flash' : '')}
+            className={'pdf-hl' + (hl.clip ? ' is-clip' : '') + (flashId === hl.id ? ' flash' : '')}
             style={{
               left: `${r.x * 100}%`, top: `${r.y * 100}%`,
               width: `${r.w * 100}%`, height: `${r.h * 100}%`,
-              background: MARKERS[hl.color] || MARKERS.amber,
+              // a clip is framed, not painted over: it is usually a formula or figure
+              [hl.clip ? 'borderColor' : 'background']: MARKERS[hl.color] || MARKERS.amber,
             }}
           />
         )))}
       </div>
-      <div className="pdf-text-layer" ref={textRef} />
+      <div className="pdf-text-layer" ref={textRef} onMouseDown={(e) => e.currentTarget.classList.add('selecting')} />
+      {clip && (
+        <div
+          className="pdf-clip-box"
+          style={{ left: `${clip.x * 100}%`, top: `${clip.y * 100}%`, width: `${clip.w * 100}%`, height: `${clip.h * 100}%` }}
+        />
+      )}
       <span className="pdf-page-num">{pageNum}</span>
     </div>
   );
@@ -119,6 +160,9 @@ export default function PdfViewer({
   const [pending, setPending] = useState(null);   // fresh text selection awaiting a marker
   const [hlPop, setHlPop] = useState(null);       // clicked existing highlight
   const [flashId, setFlashId] = useState(null);
+  const [clipMode, setClipMode] = useState(false); // drag a box to clip a formula or figure
+  const [clipDrag, setClipDrag] = useState(null);  // { page, x0, y0, x1, y1 } in page fractions
+  const [clipping, setClipping] = useState(false);
   const [readTheme, setReadTheme] = useState(() => localStorage.getItem('inkwell:pdf-theme') || 'paper');
 
   // ordered open-access copies of this paper; the reader walks the list until one loads
@@ -221,13 +265,85 @@ export default function PdfViewer({
     }, 80);
   };
 
+  // the drag is over wherever the pointer is released, inside the reader or not
+  useEffect(() => {
+    const done = () => {
+      for (const el of scrollerRef.current?.querySelectorAll('.pdf-text-layer.selecting') ?? []) el.classList.remove('selecting');
+    };
+    document.addEventListener('pointerup', done);
+    window.addEventListener('blur', done);
+    return () => { document.removeEventListener('pointerup', done); window.removeEventListener('blur', done); };
+  }, []);
+
+  /* ── clip mode: drag a box over a formula or figure, it lands in the note as an image ── */
+  const fractionAt = (e, pageNum) => {
+    const b = pageEls.current.get(pageNum)?.getBoundingClientRect();
+    if (!b) return null;
+    const clamp = (v) => Math.min(1, Math.max(0, v));
+    return [clamp((e.clientX - b.left) / b.width), clamp((e.clientY - b.top) / b.height)];
+  };
+
+  const clipDown = (e) => {
+    if (!clipMode || e.button !== 0) return;
+    const pageNum = Number(e.target.closest('.pdf-page')?.dataset.page);
+    const at = pageNum && fractionAt(e, pageNum);
+    if (!at) return;
+    e.preventDefault();
+    e.currentTarget.setPointerCapture(e.pointerId);
+    setClipDrag({ page: pageNum, x0: at[0], y0: at[1], x1: at[0], y1: at[1] });
+  };
+
+  const clipMove = (e) => {
+    if (!clipDrag) return;
+    const at = fractionAt(e, clipDrag.page); // a box stays on the page it started on
+    if (at) setClipDrag(d => ({ ...d, x1: at[0], y1: at[1] }));
+  };
+
+  const clipUp = async () => {
+    if (!clipDrag) return;
+    const drag = clipDrag;
+    setClipDrag(null);
+    const rect = clipRectOf(drag);
+    const dims0 = dims[drag.page - 1];
+    // a click, or a sliver: not a clip
+    if (!doc || !dims0 || rect.w * dims0.w < 8 || rect.h * dims0.h < 6) return;
+    setClipping(true);
+    try {
+      const image = await renderClip(doc, drag.page, rect);
+      onAddHighlight?.({
+        id: newHighlightId(),
+        page: drag.page,
+        text: '',
+        clip: true,
+        image,
+        color: 'mint',
+        rects: [{ page: drag.page, ...rect }],
+        createdAt: Date.now(),
+      });
+      setClipMode(false);
+    } catch (err) {
+      alert(`That area couldn't be clipped: ${err?.message || err}`);
+    } finally {
+      setClipping(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!clipMode) return undefined;
+    const onKey = (e) => { if (e.key === 'Escape') { setClipMode(false); setClipDrag(null); } };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [clipMode]);
+
   /* ── text selection → marker popover ── */
   const handleMouseUp = () => {
+    if (clipMode) return;
     // setTimeout, not rAF: rAF never fires in hidden/background tabs
     setTimeout(() => {
       const sel = window.getSelection();
       if (!sel || sel.isCollapsed) { setPending(null); return; }
-      const text = sel.toString().replace(/\s+/g, ' ').trim();
+      // ligatures (ﬁ, ﬂ) back to letters, as pdf.js does when copying
+      const text = normalizeUnicode(sel.toString()).replace(/\s+/g, ' ').trim();
       if (text.length < 2) { setPending(null); return; }
       const anchorEl = sel.anchorNode instanceof Element ? sel.anchorNode : sel.anchorNode?.parentElement;
       if (!anchorEl?.closest('.pdf-text-layer')) { setPending(null); return; }
@@ -287,6 +403,7 @@ export default function PdfViewer({
 
   /* ── clicking an existing highlight ── */
   const onPageClick = (e, pageNum) => {
+    if (clipMode) return;
     const sel = window.getSelection();
     if (sel && !sel.isCollapsed) return;
     const el = pageEls.current.get(pageNum);
@@ -387,6 +504,19 @@ export default function PdfViewer({
           </div>
         )}
 
+        {doc && onAddHighlight && (
+          <button
+            className={'tool-btn' + (clipMode ? ' is-on' : '')}
+            onClick={() => { setClipMode(m => !m); setClipDrag(null); setPending(null); setHlPop(null); }}
+            disabled={clipping}
+            aria-pressed={clipMode}
+            title="Clip a formula or figure into your note: drag a box around it (Esc cancels)"
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M6 2v14a2 2 0 0 0 2 2h14" /><path d="M18 22V8a2 2 0 0 0-2-2H2" /></svg>
+            {clipping ? 'Clipping…' : clipMode ? 'Drag a box…' : 'Clip'}
+          </button>
+        )}
+
         {doc && (
           <button className="tool-btn accent" onClick={handleSummarize} disabled={extracting}>
             <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M12 3l1.9 5.4L19.5 10l-5.6 1.9L12 17.5l-1.9-5.6L4.5 10l5.6-1.6z" /></svg>
@@ -424,9 +554,13 @@ export default function PdfViewer({
       ) : hasSource ? (
         <div
           ref={scrollerRef}
-          className={`pdf-scroller pdf-theme-${readTheme}`}
+          className={`pdf-scroller pdf-theme-${readTheme}` + (clipMode ? ' is-clipping' : '')}
           onScroll={handleScroll}
           onMouseUp={handleMouseUp}
+          onPointerDown={clipDown}
+          onPointerMove={clipMove}
+          onPointerUp={clipUp}
+          onPointerCancel={() => setClipDrag(null)}
         >
           {!doc && (
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px', color: 'var(--ink-3)', fontSize: '13px', paddingTop: '80px' }}>
@@ -447,6 +581,7 @@ export default function PdfViewer({
               flashId={flashId}
               registerEl={registerEl}
               onPageClick={onPageClick}
+              clip={clipDrag?.page === ix + 1 ? clipRectOf(clipDrag) : null}
             />
           ))}
         </div>
@@ -492,7 +627,7 @@ export default function PdfViewer({
       {hlPop && (
         <div className="pdf-pop" style={{ left: hlPop.x, top: hlPop.y, transform: 'translate(-50%, -100%)' }}>
           <span className="marker-dot" style={{ background: MARKERS[hlPop.hl.color] || MARKERS.amber, width: '14px', height: '14px', cursor: 'default' }} />
-          <button className="pop-btn" onClick={() => { navigator.clipboard.writeText(hlPop.hl.text); setHlPop(null); }}>Copy text</button>
+          {hlPop.hl.text && <button className="pop-btn" onClick={() => { navigator.clipboard.writeText(hlPop.hl.text); setHlPop(null); }}>Copy text</button>}
           <button className="pop-btn danger" onClick={() => { onRemoveHighlight?.(hlPop.hl.id); setHlPop(null); }}>Remove</button>
         </div>
       )}

@@ -1,7 +1,7 @@
 import { Component, useEffect, useRef, useState } from 'react';
 import { convertToExcalidrawElements } from '@excalidraw/excalidraw';
 import { fmtEdited } from '../data.js';
-import { parseBlocks, Inline, toggleTaskInDoc, extractTags, findMentions } from '../markdown.jsx';
+import { parseBlocks, Inline, MathView, toggleTaskInDoc, extractTags, findMentions } from '../markdown.jsx';
 import { fileToCompressedDataUrl, newImageId } from '../images.js';
 import { BIBLIOGRAPHY_STYLES, generateBibliography } from '../bibliography.js';
 import { wikilinkEditorHtml } from '../wiki-editor.js';
@@ -197,6 +197,7 @@ function RenderedBlock({ b, pal, doc, onDocChange, onWiki, images = {}, onDelete
   if (b.t === 'h2') return <h2 style={{ fontSize: '22px', fontWeight: 600, margin: '0 0 12px', letterSpacing: '-.01em', fontFamily: pal.headFont, color: pal.ink }}><Inline text={b.text} onWiki={onWiki} /></h2>;
   if (b.t === 'h3') return <h3 style={{ fontSize: '17.5px', fontWeight: 600, margin: '0 0 10px', fontFamily: pal.headFont, color: pal.ink }}><Inline text={b.text} onWiki={onWiki} /></h3>;
   if (b.t === 'hr') return <div style={{ borderTop: `1px solid ${pal.border}`, margin: '22px 0' }} />;
+  if (b.t === 'math') return <MathView tex={b.tex} display style={{ color: pal.ink, margin: '0 0 22px' }} />;
   if (b.t === 'p') return <p style={pStyle}><Inline text={b.text} onWiki={onWiki} /></p>;
   if (b.t === 'quote') {
     return (
@@ -829,7 +830,7 @@ export default function Editor({
     if (b.t === 'h1') return { ...base, fontSize: '27px', fontWeight: 700, lineHeight: 1.4, fontFamily: pal.headFont, color: pal.ink, margin: '0 0 12px' };
     if (b.t === 'h2') return { ...base, fontSize: '22px', fontWeight: 600, lineHeight: 1.4, fontFamily: pal.headFont, color: pal.ink, margin: '0 0 12px' };
     if (b.t === 'h3') return { ...base, fontSize: '17.5px', fontWeight: 600, lineHeight: 1.5, fontFamily: pal.headFont, color: pal.ink, margin: '0 0 10px' };
-    if (b.t === 'code' || b.t === 'sketch') return { ...base, fontFamily: 'ui-monospace, Consolas, monospace', fontSize: '13px', lineHeight: 1.6 };
+    if (b.t === 'code' || b.t === 'sketch' || b.t === 'math') return { ...base, fontFamily: 'ui-monospace, Consolas, monospace', fontSize: '13px', lineHeight: 1.6 };
     return base;
   };
 
