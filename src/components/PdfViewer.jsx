@@ -3,23 +3,12 @@ import { getDocument, GlobalWorkerOptions, normalizeUnicode, TextLayer } from 'p
 import { MARKERS, newHighlightId } from '../highlights.js';
 import { buildPdfExcerptPrompt } from '../pdf-prompts.js';
 import { publisherName } from '../pdf-sources.js';
+import { cleanSelectionText, mergeSelectionRects } from '../pdf-selection.js';
 
 GlobalWorkerOptions.workerSrc = new URL('pdfjs-dist/build/pdf.worker.min.mjs', import.meta.url).toString();
 
 const READ_THEMES = ['paper', 'sepia', 'night'];
 const THEME_LABEL = { paper: 'Paper', sepia: 'Sepia', night: 'Night' };
-
-/** Drop selection rects fully contained in another rect on the same page
-    (range.getClientRects() often doubles line + span boxes). */
-function dedupeRects(rects) {
-  const eps = 0.004;
-  return rects.filter((a, i) => !rects.some((b, j) => (
-    j !== i && b.page === a.page
-    && b.x <= a.x + eps && b.y <= a.y + eps
-    && b.x + b.w >= a.x + a.w - eps && b.y + b.h >= a.y + a.h - eps
-    && (b.w * b.h > a.w * a.h || j < i)
-  )));
-}
 
 /**
  * Render one region of a page (fractions of the page box) as an image, at print
@@ -369,8 +358,9 @@ export default function PdfViewer({
     setTimeout(() => {
       const sel = window.getSelection();
       if (!sel || sel.isCollapsed) { setPending(null); return; }
-      // ligatures (ﬁ, ﬂ) back to letters, as pdf.js does when copying
-      const text = normalizeUnicode(sel.toString()).replace(/\s+/g, ' ').trim();
+      // ligatures (ﬁ, ﬂ) back to letters, as pdf.js does when copying; words
+      // hyphenated over a line end joined again
+      const text = cleanSelectionText(normalizeUnicode(sel.toString()));
       if (text.length < 2) { setPending(null); return; }
       const anchorEl = sel.anchorNode instanceof Element ? sel.anchorNode : sel.anchorNode?.parentElement;
       if (!anchorEl?.closest('.pdf-text-layer')) { setPending(null); return; }
@@ -395,7 +385,7 @@ export default function PdfViewer({
         }
       }
       if (!rects.length) { setPending(null); return; }
-      const merged = dedupeRects(rects);
+      const merged = mergeSelectionRects(rects);
       const bb = range.getBoundingClientRect();
       setPending({
         text,
