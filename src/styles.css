@@ -419,6 +419,29 @@ textarea::placeholder { color: #4a4f5c; }
 .pdf-toolbar .tool-btn.accent:hover { background: color-mix(in oklab, var(--acc) 22%, transparent); }
 .pdf-toolbar .tool-btn.is-on { background: color-mix(in oklab, var(--acc) 22%, transparent); color: var(--acc); }
 
+/* a paper the publisher won't hand to Inkwell: the reader fetches it, drops it here */
+.pdf-blocked {
+  flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 14px; padding: 28px 24px; text-align: center; color: var(--ink-2);
+  margin: 14px; border: 1.5px dashed transparent; border-radius: 14px;
+  transition: border-color .15s ease, background .15s ease;
+}
+.pdf-blocked.is-dropping { border-color: var(--acc); background: color-mix(in oklab, var(--acc) 8%, transparent); }
+.pdf-blocked-title { font-size: 15px; font-weight: 600; color: var(--ink-1); max-width: 420px; }
+.pdf-blocked-sub { font-size: 12.5px; color: var(--ink-3); max-width: 400px; line-height: 1.55; }
+.pdf-blocked-steps {
+  margin: 4px 0 0; padding: 14px 18px 14px 34px; max-width: 420px; text-align: left;
+  font-size: 13px; line-height: 1.6; color: var(--ink-2);
+  background: var(--bg-raise); border: 1px solid var(--line-2); border-radius: 10px;
+}
+.pdf-blocked-steps li + li { margin-top: 8px; }
+.pdf-blocked-steps a, .pdf-blocked-pick { color: var(--acc); font-weight: 600; cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
+.pdf-blocked-pick input { display: none; }
+.pdf-blocked-error { font-size: 12px; color: #e7837d; max-width: 400px; line-height: 1.5; }
+.pdf-blocked-detail { font-size: 11px; color: var(--ink-3); max-width: 400px; }
+.pdf-blocked-detail summary { cursor: pointer; }
+.pdf-blocked-detail div { margin: 6px 0 8px; opacity: .8; word-break: break-all; line-height: 1.5; }
+
 /* clip mode: the page takes a box, not a text selection */
 .pdf-scroller.is-clipping .pdf-page { cursor: crosshair; }
 .pdf-scroller.is-clipping .pdf-text-layer,

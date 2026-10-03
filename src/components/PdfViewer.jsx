@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { getDocument, GlobalWorkerOptions, normalizeUnicode, TextLayer } from 'pdfjs-dist';
 import { MARKERS, newHighlightId } from '../highlights.js';
 import { buildPdfExcerptPrompt } from '../pdf-prompts.js';
+import { publisherName } from '../pdf-sources.js';
 
 GlobalWorkerOptions.workerSrc = new URL('pdfjs-dist/build/pdf.worker.min.mjs', import.meta.url).toString();
 
@@ -142,6 +143,7 @@ export default function PdfViewer({
   highlights = [], onAddHighlight, onRemoveHighlight,
   jumpHl, onJumpDone,
   onSendToAi, onClose, onLocalFile,
+  onFindMoreSources, onAttachPdf,
   layout = 'split', onLayoutChange,
 }) {
   const scrollerRef = useRef(null);
@@ -165,14 +167,32 @@ export default function PdfViewer({
   const [clipping, setClipping] = useState(false);
   const [readTheme, setReadTheme] = useState(() => localStorage.getItem('inkwell:pdf-theme') || 'paper');
 
-  // ordered open-access copies of this paper; the reader walks the list until one loads
-  const sources = localData ? [] : (pdfUrls?.length ? pdfUrls : (pdfUrl ? [pdfUrl] : []));
+  // ordered open-access copies of this paper; the reader walks the list until one
+  // loads, and when it runs out asks once for copies found elsewhere (`extra`)
+  const known = localData ? [] : (pdfUrls?.length ? pdfUrls : (pdfUrl ? [pdfUrl] : []));
+  const knownKey = known.join('|');
+  const [extra, setExtra] = useState(null); // null until looked up
+  const sources = extra ? [...known, ...extra.filter(u => !known.includes(u))] : known;
   const sourcesKey = sources.join('|');
   const [srcIx, setSrcIx] = useState(0);
-  useEffect(() => { setSrcIx(0); }, [sourcesKey]);
+  useEffect(() => { setSrcIx(0); setExtra(null); }, [knownKey]);
+  const [dropping, setDropping] = useState(false);
+  const [attachError, setAttachError] = useState(null);
+
+  const attach = async (file) => {
+    if (!file) return;
+    setAttachError(null);
+    const head = new Uint8Array(await file.slice(0, 5).arrayBuffer());
+    if (String.fromCharCode(...head) !== '%PDF-') {
+      setAttachError(`“${file.name}” isn't a PDF. On the publisher's page, use the PDF download button and attach the file it saves.`);
+      return;
+    }
+    onAttachPdf?.(file);
+  };
 
   const hasSource = Boolean(localData || sources.length);
   const activeUrl = sources.length ? sources[Math.min(srcIx, sources.length - 1)] : null;
+  const blockedBy = publisherName(sources.find(u => publisherName(u)) || landingUrl || '');
 
   /* ── document loading ── */
   useEffect(() => {
@@ -205,6 +225,13 @@ export default function PdfViewer({
         if (dead) return;
         if (!localData && srcIx < sources.length - 1) {
           setSrcIx(i => i + 1); // this copy is blocked or broken — try the next one
+        } else if (!localData && extra === null && onFindMoreSources) {
+          // every known copy failed: look further afield, once
+          const more = (await onFindMoreSources().catch(() => [])).filter(u => !sources.includes(u));
+          if (dead) return;
+          setExtra(more);
+          if (more.length) setSrcIx(sources.length);
+          else setError(String(err?.message || err));
         } else {
           setError(String(err?.message || err));
         }
@@ -538,18 +565,48 @@ export default function PdfViewer({
       </div>
 
       {error ? (
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '12px', color: 'var(--ink-2)', padding: '24px', textAlign: 'center' }}>
-          <div style={{ fontSize: '14px', fontWeight: 600 }}>This paper couldn't be loaded</div>
-          <div style={{ fontSize: '12px', color: 'var(--ink-3)', maxWidth: '340px', lineHeight: 1.5 }}>
-            {sources.length > 1
-              ? `All ${sources.length} known copies are blocked or offline — publishers sometimes refuse automated access.`
-              : 'The publisher blocked the download or the file is offline.'}
+        // Publishers that refuse Inkwell still serve the reader in her own browser:
+        // two steps (open, save) and a drop bring the paper in, for good.
+        <div
+          className={'pdf-blocked' + (dropping ? ' is-dropping' : '')}
+          onDragOver={(e) => { if (onAttachPdf && e.dataTransfer?.types?.includes('Files')) { e.preventDefault(); setDropping(true); } }}
+          onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget)) setDropping(false); }}
+          onDrop={(e) => { e.preventDefault(); setDropping(false); attach(e.dataTransfer.files?.[0]); }}
+        >
+          <div className="pdf-blocked-title">
+            {blockedBy ? `${blockedBy} doesn't let apps download this paper` : 'This paper couldn’t be downloaded automatically'}
           </div>
-          <div style={{ fontSize: '11px', color: 'var(--ink-3)', maxWidth: '340px', lineHeight: 1.5, opacity: .7 }}>{error}</div>
-          <div style={{ display: 'flex', gap: '8px' }}>
-            <button className="tool-btn accent" style={{ border: 'none', font: 'inherit', fontSize: '12px', borderRadius: '7px', padding: '7px 14px', cursor: 'pointer' }} onClick={() => { setSrcIx(0); setReloadTick(t => t + 1); }}>Try again</button>
-            {(landingUrl || activeUrl) && <a href={landingUrl || activeUrl} target="_blank" rel="noreferrer" style={{ fontSize: '12px', color: 'var(--acc)', alignSelf: 'center' }}>Open on the publisher's site ↗</a>}
+          <div className="pdf-blocked-sub">
+            {blockedBy
+              ? `It's free to read, but ${blockedBy} only hands the PDF to a person in a browser. Get it yourself in two clicks and Inkwell will keep it with this paper.`
+              : `Inkwell tried ${sources.length === 1 ? 'the only known copy' : `all ${sources.length} known copies`}. Get the PDF yourself and Inkwell will keep it with this paper.`}
           </div>
+          {onAttachPdf ? (
+            <ol className="pdf-blocked-steps">
+              <li>
+                {(landingUrl || activeUrl)
+                  ? <a href={activeUrl || landingUrl} target="_blank" rel="noreferrer">Open the paper{blockedBy ? ` on ${blockedBy}` : ''} ↗</a>
+                  : 'Find the paper on the publisher’s site'}
+                <span> and save the PDF (download button, or Ctrl+S on the PDF).</span>
+              </li>
+              <li>
+                <b>Drop the file here</b>, or{' '}
+                <label className="pdf-blocked-pick">
+                  choose it
+                  <input type="file" accept="application/pdf,.pdf" onChange={(e) => { attach(e.target.files?.[0]); e.target.value = ''; }} />
+                </label>
+                {' '}from Downloads.
+              </li>
+            </ol>
+          ) : (landingUrl || activeUrl) && (
+            <a href={landingUrl || activeUrl} target="_blank" rel="noreferrer" style={{ fontSize: '12px', color: 'var(--acc)' }}>Open on the publisher's site ↗</a>
+          )}
+          {attachError && <div className="pdf-blocked-error">{attachError}</div>}
+          <details className="pdf-blocked-detail">
+            <summary>Details</summary>
+            <div>{error}</div>
+            <button type="button" className="tool-btn" onClick={() => { setSrcIx(0); setReloadTick(t => t + 1); }}>Try the download again</button>
+          </details>
         </div>
       ) : hasSource ? (
         <div

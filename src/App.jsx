@@ -12,6 +12,8 @@ import { generateDeckSpec } from './deck/generate.js';
 import { deckSlideKeys } from './deck/registry.jsx';
 import { deckFromOutlineSlides } from './deck/from-outline.js';
 import { fileToCompressedDataUrl, newImageId } from './images.js';
+import { loadPaperPdf, savePaperPdf } from './pdf-store.js';
+import { findMoreCopies, orderPdfCandidates } from './pdf-sources.js';
 import { moveVaultItem, uniqueVaultName } from './vault.js';
 import { DEFAULT_LAMP, applyLamp, nextLamp, normalizeLamp } from './lamp.js';
 import { readSession, resolveSession, writeSession } from './session.js';
@@ -249,22 +251,47 @@ export default function App() {
     for (const item of items) importReference(item, { open: false });
   };
 
+  /** What the reader needs for a library paper: its copies, free repositories
+      first and blocking publishers last, and the attached file when there is one. */
+  const readerFor = (ref, noteId, localData = null) => ({
+    url: ref.pdfUrl || null,
+    urls: orderPdfCandidates([...(ref.pdfCandidates || []), ref.pdfUrl]),
+    landing: ref.url, doi: ref.doi,
+    localData,
+    title: ref.title, citationKey: ref.citationKey, paperId: paperIdOf(ref), noteId,
+  });
+
+  /** Keep a PDF the reader fetched by hand with its paper, and read from it. */
+  const attachPdf = async (ref, file, pid = paperIdOf(ref)) => {
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    const kept = await savePaperPdf(pid, bytes);
+    if (kept) setReferences(rs => rs.map(r => (paperIdOf(r) === pid ? { ...r, hasLocalPdf: true } : r)));
+    if (activePdf?.paperId === pid) setActivePdf(p => (p?.paperId === pid ? { ...p, localData: bytes } : p));
+    else await openPaper({ ...ref, hasLocalPdf: kept }, { localData: bytes });
+    if (!kept) alert('The paper is open, but this browser would not keep a copy (storage is blocked or full), so it will need attaching again next time.');
+  };
+
   /** Open a paper in the reader; queue status moves to "reading". Papers straight
       from search get imported first, in the same tick, so the note never doubles.
       The paper opens ONTO its own literature note — other notes stay full-width. */
-  const openPaper = (ref) => {
-    if (!ref.pdfUrl) return;
+  const openPaper = async (ref, { localData = null } = {}) => {
+    if (!ref.pdfUrl && !ref.hasLocalPdf && !localData) return;
     const pid = paperIdOf(ref);
     const inLibrary = references.some(r => paperIdOf(r) === pid);
     const noteId = inLibrary
       ? ensurePaperNote({ paperId: pid, title: ref.title, citationKey: ref.citationKey })
       : importReference(ref);
-    setActivePdf({
-      url: ref.pdfUrl,
-      urls: ref.pdfCandidates?.length ? ref.pdfCandidates : [ref.pdfUrl],
-      landing: ref.url,
-      title: ref.title, citationKey: ref.citationKey, paperId: pid, noteId,
-    });
+    // a copy the reader attached earlier opens at once, and never hits the publisher
+    const stored = localData ?? (ref.hasLocalPdf ? await loadPaperPdf(pid) : null);
+    if (ref.hasLocalPdf && !stored) {
+      // site data was cleared: forget the attachment, fall back to the web copies
+      setReferences(rs => rs.map(r => (paperIdOf(r) === pid ? { ...r, hasLocalPdf: false } : r)));
+      if (!ref.pdfUrl) {
+        alert('The PDF attached to this paper is no longer in this browser (its site data was cleared). Attach it again from the reading queue.');
+        return;
+      }
+    }
+    setActivePdf(readerFor(ref, noteId, stored));
     setReferences(rs => rs.map(r => (paperIdOf(r) === pid
       ? { ...r, status: r.status === 'done' ? 'done' : 'reading', lastOpenedAt: Date.now() }
       : r)));
@@ -282,6 +309,8 @@ export default function App() {
     const title = file.name.replace(/\.pdf$/i, '');
     const pid = 'local:' + file.name;
     const noteId = ensurePaperNote({ paperId: pid, title });
+    // kept, so its highlight links still open it after a reload
+    savePaperPdf(pid, bytes);
     setActivePdf({ localData: bytes, title, citationKey: null, paperId: pid, noteId });
     setOpenTabs(t => (t.includes(noteId) ? t : [...t, noteId]));
     setActiveFile(noteId);
@@ -372,7 +401,7 @@ export default function App() {
 
   // clicking a hl:// backlink in any note jumps back to the exact spot in the paper
   useEffect(() => {
-    const onJump = (e) => {
+    const onJump = async (e) => {
       const id = e.detail?.id;
       const found = findHighlight(highlights, id);
       if (!found) return;
@@ -387,18 +416,17 @@ export default function App() {
         setJumpHl(id);
         return;
       }
-      const ref = references.find(r => paperIdOf(r) === pid);
-      if (!ref?.pdfUrl) {
-        alert('This highlight lives in a local PDF — open that file in the reader first, then the link will jump to it.');
+      const ref = references.find(r => paperIdOf(r) === pid)
+        ?? (pid.startsWith('local:') ? { title: pid.slice(6).replace(/\.pdf$/i, ''), localPid: pid } : null);
+      const stored = await loadPaperPdf(pid);
+      if (!ref || (!ref.pdfUrl && !stored)) {
+        alert('This highlight lives in a PDF this browser no longer has — open or attach that file in the reader again, then the link will jump to it.');
         return;
       }
       const noteId = ensurePaperNote({ paperId: pid, title: ref.title, citationKey: ref.citationKey });
-      setActivePdf({
-        url: ref.pdfUrl,
-        urls: ref.pdfCandidates?.length ? ref.pdfCandidates : [ref.pdfUrl],
-        landing: ref.url,
-        title: ref.title, citationKey: ref.citationKey, paperId: pid, noteId,
-      });
+      setActivePdf(ref.localPid
+        ? { localData: stored, title: ref.title, citationKey: null, paperId: pid, noteId }
+        : readerFor(ref, noteId, stored));
       setOpenTabs(t => (t.includes(noteId) ? t : [...t, noteId]));
       setActiveFile(noteId);
       setSidebarOpen(false);
@@ -921,6 +949,12 @@ export default function App() {
         }}
         onClose={() => { setActivePdf(null); setJumpHl(null); }}
         onLocalFile={openLocalPdf}
+        onFindMoreSources={() => findMoreCopies({ doi: activePdf.doi })}
+        onAttachPdf={(file) => attachPdf(
+          references.find(r => paperIdOf(r) === activePdf.paperId) ?? { title: activePdf.title, citationKey: activePdf.citationKey, url: activePdf.landing },
+          file,
+          activePdf.paperId,
+        )}
       />
     </Suspense>
   );
@@ -982,6 +1016,7 @@ export default function App() {
               setView('editor');
             }}
             onLocalPdf={openLocalPdf}
+            onAttachPdf={attachPdf}
             onCreateSynthesis={createLiteratureMap}
             onCreateEvidenceMatrix={createEvidenceMatrix}
             onAskAssistant={(prompt) => { setAiOpen(true); setResearchOpen(false); sendMessage(prompt); }}
