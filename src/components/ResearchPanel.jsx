@@ -262,7 +262,7 @@ export default function ResearchPanel({
   };
 
   return (
-    <div className="side-panel" style={{ width: '330px', borderRight: '1px solid var(--line)' }}>
+    <div className="side-panel" style={{ width: '100%', borderRight: '1px solid var(--line)' }}>
       <div className="panel-header">
         <span className="panel-title">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--acc)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20M4 19.5A2.5 2.5 0 0 0 6.5 22H20M4 19.5v-15A2.5 2.5 0 0 1 6.5 2M20 4v18" /><path d="M6 6h10M6 10h10" /></svg>

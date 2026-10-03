@@ -26,6 +26,7 @@ import QuickSwitcher from './components/QuickSwitcher.jsx';
 import SettingsModal from './components/SettingsModal.jsx';
 import StatusBar from './components/StatusBar.jsx';
 import WorkspaceSplit from './components/WorkspaceSplit.jsx';
+import { ResizableSide } from './components/Sash.jsx';
 import 'katex/dist/katex.min.css';
 
 // These packages pull in PDF.js, Cytoscape, Excalidraw rendering, and the deck runtime.
@@ -1063,6 +1064,7 @@ export default function App() {
         )}
 
         {!focusMode && researchOpen && (
+          <ResizableSide id="research" edge="right" defaultWidth={330} min={260} max={720} label="Resize research library" onCollapse={() => setResearchOpen(false)}>
           <Suspense fallback={<FeatureLoading label="Opening research library…" />}><ResearchPanel
             references={references}
             highlights={highlights}
@@ -1087,9 +1089,11 @@ export default function App() {
             onAskAssistant={(prompt) => { setAiOpen(true); setResearchOpen(false); sendMessage(prompt); }}
             onClose={() => setResearchOpen(false)}
           /></Suspense>
+          </ResizableSide>
         )}
 
         {!focusMode && view === 'editor' && sidebarOpen && (
+          <ResizableSide id="vault" edge="right" defaultWidth={252} min={190} max={520} label="Resize vault" onCollapse={() => setSidebarOpen(false)}>
           <Sidebar
             files={files} activeFile={activeFile} collapsed={collapsed}
             onOpen={openFile}
@@ -1102,9 +1106,10 @@ export default function App() {
             onDuplicate={duplicateNote}
             onDelete={deleteNote}
           />
+          </ResizableSide>
         )}
 
-        <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', background: '#1e2025', position: 'relative' }}>
+        <div data-main-area style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', background: '#1e2025', position: 'relative' }}>
           {focusMode && (
             <div 
               onClick={() => setFocusMode(false)}
@@ -1172,6 +1177,7 @@ export default function App() {
         </div>
 
         {!focusMode && aiOpen && (
+          <ResizableSide id="assistant" edge="left" defaultWidth={300} min={260} max={760} label="Resize assistant" onCollapse={() => setAiOpen(false)}>
           <AIPanel
             messages={aiMessages} typing={aiTyping} input={aiInput}
             onInput={setAiInput} onSend={sendMessage} onWiki={openWiki} provider={aiProvider} localAi={settings.localAi}
@@ -1182,6 +1188,7 @@ export default function App() {
             slideLabel={activeDeck?.elements?.[selectedDeckSlide]?.type === 'Slide' ? `slide ${Math.max(1, deckSlideKeys(activeDeck).indexOf(selectedDeckSlide) + 1)}` : null}
             onClose={() => setAiOpen(false)}
           />
+          </ResizableSide>
         )}
       </div>
 

@@ -212,6 +212,28 @@ textarea::placeholder { color: #4a4f5c; }
 /* ── shared panel shell ──
    Every side panel (files, research, assistant) gets the same skeleton:
    same width rhythm, same 44px header, same label voice. */
+/* ── resizable side bars (Sash.jsx), VS Code-style ── */
+.side-wrap { position: relative; display: flex; flex-shrink: 0; min-width: 0; }
+.side-wrap > .side-panel { flex: 1; min-width: 0; }
+.sash {
+  position: absolute; top: 0; bottom: 0; width: 7px; z-index: 40;
+  cursor: col-resize; touch-action: none; outline: none;
+}
+.sash-right { right: -3px; }
+.sash-left { left: -3px; }
+.side-wrap > .sash-right { right: -4px; }
+.sash::after {
+  content: ''; position: absolute; top: 0; bottom: 0; left: 2px; width: 3px;
+  background: transparent; transition: background .1s ease;
+}
+/* a beat before lighting up, so passing the pointer over an edge stays quiet */
+.sash:hover::after { background: color-mix(in oklab, var(--acc) 70%, transparent); transition-delay: .25s; }
+.sash.is-dragging::after, .sash:focus-visible::after { background: var(--acc); transition-delay: 0s; }
+html.is-resizing, html.is-resizing * { cursor: col-resize !important; user-select: none !important; }
+/* iframes, canvases and the PDF text layer must not swallow the drag */
+html.is-resizing iframe, html.is-resizing canvas, html.is-resizing .pdf-text-layer { pointer-events: none; }
+.sash.deck-sash { left: auto; right: auto; }
+
 .side-panel {
   background: var(--bg-panel);
   display: flex;
@@ -697,7 +719,8 @@ textarea::placeholder { color: #4a4f5c; }
 /* Presentation studio: navigator, stage, then only the controls that matter. */
 .deck-studio {
   display: grid;
-  grid-template-columns: 150px minmax(0, 1fr) 220px;
+  grid-template-columns: var(--film-w, 150px) minmax(0, 1fr) var(--insp-w, 220px);
+  position: relative;
   min-height: min(680px, calc(100vh - 225px));
   border: 1px solid var(--line-2);
   border-radius: 14px;
@@ -737,7 +760,7 @@ textarea::placeholder { color: #4a4f5c; }
 .deck-inspector-more { display: grid; gap: 7px; padding: 12px 2px; color: var(--ink-3); font-size: 11px; }
 .deck-inspector-more summary { cursor: pointer; }
 .deck-legacy-grid, .deck-legacy-workbench, .deck-legacy-add { display: none !important; }
-@media (max-width: 920px) { .deck-studio { grid-template-columns: 112px minmax(0, 1fr); } .deck-inspector { grid-column: 1 / -1; border-left: 0; border-top: 1px solid var(--line-2); display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; } .deck-inspector .deck-pane-heading { display: none; } }
+@media (max-width: 920px) { .deck-sash { display: none; } .deck-studio { grid-template-columns: 112px minmax(0, 1fr); } .deck-inspector { grid-column: 1 / -1; border-left: 0; border-top: 1px solid var(--line-2); display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; } .deck-inspector .deck-pane-heading { display: none; } }
 @media (max-width: 650px) { .deck-studio { grid-template-columns: 1fr; } .deck-filmstrip { border-right: 0; border-bottom: 1px solid var(--line-2); max-height: 145px; } .deck-filmstrip-list { display: flex; overflow-x: auto; } .deck-filmstrip-item { flex: 0 0 92px; } .deck-inspector { grid-template-columns: 1fr; } .deck-stage { padding: 10px; } }
 
 /* PDF + note workspace — a deliberate ink seam, not an IDE divider. */

@@ -371,7 +371,7 @@ export default function Sidebar({
   const projectTotal = files.filter(f => f.folder && f.kind === 'project').length;
 
   return (
-    <div className="side-panel vault" style={{ width: '252px', borderRight: '1px solid var(--line)' }}>
+    <div className="side-panel vault" style={{ width: '100%', borderRight: '1px solid var(--line)' }}>
       <div className="panel-header">
         <span className="panel-title">{ICON.folder} Vault</span>
         <div className="vault-tools">

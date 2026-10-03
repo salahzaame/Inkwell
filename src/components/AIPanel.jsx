@@ -73,7 +73,7 @@ export default function AIPanel({ messages, typing, input, onInput, onSend, onPr
   const chip = { fontSize: '11.5px', color: 'var(--ink-2)', border: '1px solid var(--line-2)', borderRadius: '99px', padding: '4px 10px', cursor: 'pointer' };
 
   return (
-    <div className="side-panel" style={{ width: '300px', borderLeft: '1px solid var(--line)' }}>
+    <div className="side-panel" style={{ width: '100%', borderLeft: '1px solid var(--line)' }}>
       <div className="panel-header">
         <span className="panel-title">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="var(--acc)"><path d="M12 3l1.9 5.4L19.5 10l-5.6 1.9L12 17.5l-1.9-5.6L4.5 10l5.6-1.6z" /></svg>
