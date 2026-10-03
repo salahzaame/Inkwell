@@ -105,26 +105,107 @@ input, textarea { font-family: 'Instrument Sans', system-ui, sans-serif; }
 .note-figure:hover .note-figure-del { opacity: 1; }
 .note-figure-del:hover { background: rgba(20, 21, 24, .85); color: #f87171; }
 
-/* file-tree delete button, revealed on row hover */
-.tree-del, .tree-move { opacity: 0; transition: opacity .12s; }
-.tree-row:hover .tree-del, .tree-row:hover .tree-move { opacity: 1; }
-.tree-del:hover { background: var(--line-2); color: var(--danger) !important; }
-.tree-move:hover { background: var(--line-2) !important; color: var(--acc) !important; }
-.tree-drop-target { outline: 1px solid color-mix(in oklab, var(--acc) 70%, transparent); background: color-mix(in oklab, var(--acc) 13%, transparent) !important; }
-.vault-move-menu { position: absolute; z-index: 50; top: calc(100% + 3px); right: 4px; min-width: 174px; padding: 5px; border: 1px solid var(--line-2); border-radius: 8px; background: var(--bg-raise); box-shadow: 0 12px 30px rgba(0,0,0,.36); }
-.vault-move-menu-label { padding: 4px 7px 5px; color: var(--ink-3); font-size: 10px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; }
-.vault-move-menu button { display: block; width: 100%; border: 0; border-radius: 5px; background: transparent; color: var(--ink-2); cursor: pointer; font: inherit; font-size: 12px; text-align: left; padding: 6px 7px; }
-.vault-move-menu button:hover { color: var(--acc); background: color-mix(in oklab, var(--acc) 10%, transparent); }
-.vault-move-empty { color: var(--ink-3); font-size: 11px; padding: 6px 7px; }
-.vault-add, .vault-new-note { border: 1px solid var(--line-2); background: var(--bg-raise); color: var(--ink-2); border-radius: 6px; cursor: pointer; font: inherit; font-size: 10.5px; font-weight: 700; padding: 4px 7px; }
-.vault-add:hover, .vault-new-note:hover { border-color: color-mix(in oklab, var(--acc) 55%, var(--line-2)); color: var(--acc); }
-.vault-add.icon { padding: 3px 8px; font-size: 14px; line-height: 1; }
-.vault-new-note { width: 100%; color: var(--acc); background: color-mix(in oklab, var(--acc) 7%, var(--bg-raise)); text-align: left; }
-.vault-move-note { width: 100%; border: 0; background: transparent; color: var(--ink-3); cursor: pointer; font: inherit; font-size: 10.5px; text-align: left; padding: 3px 1px; }
-.vault-move-note:hover { color: var(--acc); }
-.vault-create-form { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 5px; align-items: center; margin: 8px 10px 2px; padding: 7px; border: 1px solid color-mix(in oklab, var(--acc) 35%, var(--line-2)); border-radius: 7px; background: var(--bg-raise); color: var(--ink-3); font-size: 10px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
-.vault-create-form input { min-width: 0; border: 0; border-bottom: 1px solid var(--line-2); background: transparent; color: var(--ink-1); outline: none; font: inherit; font-size: 12px; padding: 3px 1px; text-transform: none; letter-spacing: 0; }
-.vault-create-form button { border: 0; background: transparent; color: var(--acc); cursor: pointer; font: inherit; font-size: 10px; font-weight: 700; }
+/* ── the vault tree ── */
+.vault-tools { display: flex; gap: 2px; }
+.vault-tools button, .vault-section button, .tree-actions button {
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 0; background: transparent; color: var(--ink-3); cursor: pointer; border-radius: 6px;
+}
+.vault-tools button { width: 26px; height: 26px; }
+.vault-tools button:hover, .vault-section button:hover, .tree-actions button:hover { background: var(--bg-raise); color: var(--ink-1); }
+
+.vault-new-note {
+  display: flex; align-items: center; gap: 7px; margin: 10px 10px 4px; padding: 7px 9px; min-width: 0;
+  border: 1px solid color-mix(in oklab, var(--acc) 30%, var(--line-2)); border-radius: 8px;
+  background: color-mix(in oklab, var(--acc) 7%, var(--bg-raise)); color: var(--acc);
+  cursor: pointer; font: inherit; font-size: 12.5px; font-weight: 600; text-align: left;
+}
+.vault-new-note:hover { border-color: color-mix(in oklab, var(--acc) 60%, var(--line-2)); }
+.vault-new-plus { display: inline-flex; flex-shrink: 0; }
+.vault-new-where { margin-left: auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-3); font-weight: 400; font-size: 11px; }
+
+.vault-tree { flex: 1; overflow-y: auto; padding: 4px 6px 16px; outline: none; border-radius: 8px; }
+.vault-tree.is-drop-root { background: color-mix(in oklab, var(--acc) 6%, transparent); box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--acc) 40%, transparent); }
+
+.vault-section {
+  display: flex; align-items: center; justify-content: space-between;
+  margin: 12px 4px 3px 8px; height: 22px;
+  font-size: 10.5px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3);
+}
+.vault-section button { width: 22px; height: 22px; opacity: .7; }
+.vault-section:hover button { opacity: 1; }
+.vault-hint {
+  display: block; width: calc(100% - 8px); margin: 2px 4px 4px; padding: 8px 10px;
+  border: 1px dashed var(--line-2); border-radius: 8px; background: transparent;
+  color: var(--ink-3); font: inherit; font-size: 11.5px; line-height: 1.45; text-align: left; cursor: pointer;
+}
+button.vault-hint:hover { color: var(--acc); border-color: color-mix(in oklab, var(--acc) 50%, var(--line-2)); }
+.vault-hint.is-quiet { border: 0; cursor: default; padding: 4px 10px; }
+
+.tree-row {
+  position: relative; display: flex; align-items: center; gap: 6px; min-height: 28px; padding-right: 4px;
+  border-radius: 6px; cursor: pointer; user-select: none; outline: none;
+  font-size: 13px; color: var(--ink-2);
+}
+.tree-row:hover { background: var(--bg-raise); }
+.tree-row.is-selected { background: var(--bg-raise); }
+.tree-row:focus-visible { box-shadow: inset 0 0 0 1.5px color-mix(in oklab, var(--acc) 70%, transparent); }
+.tree-row.is-active { background: color-mix(in oklab, var(--acc) 16%, transparent); color: var(--ink-1); }
+.tree-row.is-active .tree-icon { color: var(--acc); }
+.tree-row.is-folder { color: var(--ink-2); font-weight: 500; }
+.tree-row.is-project { color: var(--ink-1); font-weight: 600; }
+.tree-row.is-project .tree-icon { color: var(--acc); }
+.tree-row.is-drop { background: color-mix(in oklab, var(--acc) 16%, transparent); box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--acc) 70%, transparent); }
+.tree-row.is-dragging { opacity: .45; }
+.tree-row.is-draft { background: var(--bg-raise); cursor: default; }
+
+.tree-guide { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--line); pointer-events: none; }
+.tree-chev { width: 12px; flex-shrink: 0; display: inline-flex; justify-content: center; font-size: 9px; color: var(--ink-3); }
+.tree-icon { display: inline-flex; flex-shrink: 0; color: var(--ink-3); }
+.tree-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tree-count { flex-shrink: 0; font-size: 10.5px; color: var(--ink-3); font-variant-numeric: tabular-nums; padding: 0 2px; }
+.tree-actions { display: none; flex-shrink: 0; gap: 1px; }
+.tree-row:hover .tree-actions, .tree-row.is-selected:focus-within .tree-actions { display: inline-flex; }
+.tree-row:hover .tree-count { display: none; }
+.tree-actions button { width: 22px; height: 22px; }
+.tree-actions button:hover { background: var(--line-2); }
+
+.tree-name-box { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 5px; padding: 3px 0; }
+.tree-name-box > input {
+  width: 100%; min-width: 0; padding: 3px 6px; border-radius: 5px;
+  border: 1px solid color-mix(in oklab, var(--acc) 60%, var(--line-2)); background: var(--bg-panel);
+  color: var(--ink-1); font: inherit; font-size: 13px; outline: none;
+}
+.tree-starter { display: flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 400; color: var(--ink-3); cursor: pointer; }
+.tree-starter input { accent-color: var(--acc); margin: 0; }
+
+.tree-empty { font-size: 11.5px; color: var(--ink-3); padding-top: 3px; padding-bottom: 5px; }
+.tree-empty button { border: 0; background: none; padding: 0; color: var(--acc); cursor: pointer; font: inherit; }
+.tree-empty button:hover { text-decoration: underline; }
+
+.vault-foot { padding: 10px 14px; border-top: 1px solid var(--line); font-size: 11px; color: var(--ink-3); display: flex; align-items: center; gap: 6px; }
+.vault-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--ok); display: inline-block; }
+
+/* ── context menus ── */
+.ctx-menu {
+  position: fixed; z-index: 1000; min-width: 196px; max-width: 280px; max-height: min(70vh, 460px); overflow-y: auto;
+  padding: 5px; border: 1px solid var(--line-2); border-radius: 9px; outline: none;
+  background: var(--bg-raise); box-shadow: 0 14px 36px rgba(0,0,0,.38), 0 2px 6px rgba(0,0,0,.2);
+  font-size: 12.5px; color: var(--ink-2); animation: ctxIn .09s ease-out;
+}
+@keyframes ctxIn { from { opacity: 0; transform: translateY(-2px); } to { opacity: 1; transform: none; } }
+.ctx-item { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-radius: 6px; cursor: pointer; white-space: nowrap; }
+.ctx-item.is-active { background: color-mix(in oklab, var(--acc) 14%, transparent); color: var(--ink-1); }
+.ctx-item.is-danger { color: var(--danger); }
+.ctx-item.is-danger.is-active { background: color-mix(in oklab, var(--danger) 14%, transparent); }
+.ctx-item.is-disabled { opacity: .5; cursor: default; }
+.ctx-icon { width: 15px; display: inline-flex; justify-content: center; flex-shrink: 0; color: var(--ink-3); font-size: 12px; }
+.ctx-item.is-active .ctx-icon { color: var(--acc); }
+.ctx-item.is-danger .ctx-icon { color: inherit; }
+.ctx-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.ctx-hint { color: var(--ink-3); font-size: 11px; }
+.ctx-sep { height: 1px; margin: 5px 6px; background: var(--line-2); }
+.ctx-heading { padding: 6px 10px 3px; font-size: 10px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3); }
 
 textarea::placeholder { color: #4a4f5c; }
 

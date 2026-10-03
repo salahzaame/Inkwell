@@ -14,7 +14,7 @@ import { deckFromOutlineSlides } from './deck/from-outline.js';
 import { fileToCompressedDataUrl, newImageId } from './images.js';
 import { loadPaperPdf, savePaperPdf } from './pdf-store.js';
 import { findMoreCopies, orderPdfCandidates } from './pdf-sources.js';
-import { moveVaultItem, uniqueVaultName } from './vault.js';
+import { PROJECT_STARTER, canMoveInto, descendantIds, moveVaultItem, uniqueVaultName } from './vault.js';
 import { DEFAULT_LAMP, applyLamp, nextLamp, normalizeLamp } from './lamp.js';
 import { readSession, resolveSession, writeSession } from './session.js';
 import IconRail from './components/IconRail.jsx';
@@ -102,7 +102,13 @@ export default function App() {
   const [images, setImages] = useState(saved.images ?? {});
   const [activeFile, setActiveFile] = useState(restored.noteId);
   const [openTabs, setOpenTabs] = useState(restored.tabs);
-  const [collapsed, setCollapsed] = useState({});
+  // which folders are folded, kept across sessions as the reader left them
+  const [collapsed, setCollapsed] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('inkwell:collapsed')) || {}; } catch { return {}; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem('inkwell:collapsed', JSON.stringify(collapsed)); } catch { /* private mode */ }
+  }, [collapsed]);
 
   const [switcherOpen, setSwitcherOpen] = useState(false);
   const [query, setQuery] = useState('');
@@ -560,7 +566,6 @@ export default function App() {
     const id = 'n' + Date.now();
     setFiles(fs => [...fs, { id, name, top: true, mtime: Date.now() }]);
     setDocs(d => ({ ...d, [id]: '' }));
-    if (parent) setCollapsed(current => ({ ...current, [parent]: false }));
     setActiveFile(id);
     setView('editor');
     setOpenTabs(t => [...t, id]);
@@ -579,37 +584,88 @@ export default function App() {
     });
   };
 
-  const newNote = (parent = null) => {
-    const id = 'n' + Date.now();
-    const name = uniqueVaultName(files, 'Untitled', parent);
-    setFiles(f => [...f, { id, name, parent: parent || undefined, top: !parent, mtime: Date.now() }]);
-    setDocs(d => ({ ...d, [id]: '' }));
+  const vaultId = (prefix) => `${prefix}${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`;
+
+  /** A new note in `parent` (null: the vault root), opened. Returns its id. */
+  const newNote = (parent = null, name = 'Untitled', body = '') => {
+    const id = vaultId('n');
+    const clean = uniqueVaultName(files, name, parent);
+    setFiles(f => [...f, { id, name: clean, parent: parent || undefined, top: !parent, mtime: Date.now() }]);
+    setDocs(d => ({ ...d, [id]: body }));
+    if (parent) setCollapsed(current => ({ ...current, [parent]: false }));
     setOpenTabs(t => [...t, id]);
     setActiveFile(id);
     setView('editor');
-  };
-
-  const createVaultFolder = (name, parent = null, kind = 'folder') => {
-    const id = `${kind}-${Date.now().toString(36)}`;
-    const clean = uniqueVaultName(files, name || (kind === 'project' ? 'New project' : 'New folder'), parent);
-    setFiles(current => [...current, { id, name: clean, folder: true, kind, parent: parent || undefined, top: !parent, mtime: Date.now() }]);
-    setCollapsed(current => ({ ...current, [id]: false, ...(parent ? { [parent]: false } : {}) }));
     return id;
   };
 
-  const moveNoteToFolder = (noteId, parent) => {
-    if (!noteId || !files.some(file => file.id === noteId && !file.folder)) return;
-    if (parent && !files.some(file => file.id === parent && file.folder)) return;
-    setFiles(current => moveVaultItem(current, noteId, parent));
+  /**
+   * A project or folder. A project made `withStarter` comes with Literature,
+   * Methods and Writing folders and an Overview note, opened, to write in.
+   */
+  const createVaultFolder = (name, parent = null, kind = 'folder', { withStarter = false } = {}) => {
+    const id = vaultId(kind + '-');
+    const now = Date.now();
+    const clean = uniqueVaultName(files, name || (kind === 'project' ? 'New project' : 'New folder'), parent);
+    const made = [{ id, name: clean, folder: true, kind, parent: parent || undefined, top: !parent, mtime: now }];
+    if (withStarter) {
+      PROJECT_STARTER.folders.forEach((folder, i) => made.push({ id: `${id}-f${i}`, name: folder, folder: true, kind: 'folder', parent: id, top: false, mtime: now }));
+      const overviewId = `${id}-overview`;
+      made.push({ id: overviewId, name: `${clean} — Overview`, parent: id, top: false, mtime: now });
+      setDocs(d => ({ ...d, [overviewId]: PROJECT_STARTER.overview(clean) }));
+      setOpenTabs(t => [...t, overviewId]);
+      setActiveFile(overviewId);
+      setView('editor');
+    }
+    setFiles(current => [...current, ...made]);
+    // starter folders start folded: the project opens on its Overview, not three empty rows
+    const folded = Object.fromEntries(made.filter(f => f.folder && f.id !== id).map(f => [f.id, true]));
+    setCollapsed(current => ({ ...current, ...folded, [id]: false, ...(parent ? { [parent]: false } : {}) }));
+    return id;
+  };
+
+  /** Move a note or folder into `parent` (null: the vault root), if the tree allows it. */
+  const moveItem = (id, parent) => {
+    if (!canMoveInto(files, id, parent)) return;
+    const item = files.find(f => f.id === id);
+    // a name already taken there gets a number, as a new item would
+    const name = uniqueVaultName(files, item.name, parent, id);
+    setFiles(current => moveVaultItem(current, id, parent).map(f => (f.id === id ? { ...f, name } : f)));
     if (parent) setCollapsed(current => ({ ...current, [parent]: false }));
   };
 
-  /** Rename a note and rewrite [[wikilinks]] pointing at it across the vault. */
+  /** A copy of a note beside it; its sketches and images are copied too, so the two never share one. */
+  const duplicateNote = (id) => {
+    const src = files.find(f => f.id === id && !f.folder);
+    if (!src) return;
+    const newSketches = {};
+    const newImages = {};
+    const body = (docs[id] ?? '')
+      .replace(/^```sketch[ \t]+(\S+)/gm, (line, skId) => {
+        if (!sketches[skId]) return line;
+        const copy = vaultId('sketch-');
+        newSketches[copy] = structuredClone(sketches[skId]);
+        return '```sketch ' + copy;
+      })
+      .replace(/\]\(img:([^)\s]+)\)/g, (ref, imgId) => {
+        if (!images[imgId]) return ref;
+        const copy = newImageId();
+        newImages[copy] = images[imgId];
+        return `](img:${copy})`;
+      });
+    setSketches(s => ({ ...s, ...newSketches }));
+    setImages(s => ({ ...s, ...newImages }));
+    newNote(src.parent || null, `${src.name} copy`, body);
+  };
+
+  /** Rename a note (rewriting [[wikilinks]] to it across the vault), or a folder or project. */
   const renameFile = (id, name) => {
-    const clean = name.trim() || 'Untitled';
     const old = files.find(f => f.id === id);
-    if (!old || old.name === clean) return;
+    if (!old) return;
+    const clean = old.folder ? uniqueVaultName(files, name, old.parent || null, id) : (name.trim() || 'Untitled');
+    if (old.name === clean) return;
     setFiles(f => f.map(x => (x.id === id ? { ...x, name: clean, mtime: Date.now() } : x)));
+    if (old.folder) return; // links point at notes, never at folders
     setDocs(d => {
       const out = {};
       for (const [k, v] of Object.entries(d)) out[k] = v.split('[[' + old.name + ']]').join('[[' + clean + ']]');
@@ -617,15 +673,24 @@ export default function App() {
     });
   };
 
+  /** Delete a note, or a folder or project with everything inside it, after asking. */
   const deleteNote = (id) => {
     const f = files.find(x => x.id === id);
-    if (!f || f.folder) return;
-    if (!window.confirm(`Delete "${f.name}"? This can't be undone.`)) return;
-    const doomedBlocks = parseBlocks(docs[id] ?? '');
+    if (!f) return;
+    const inside = f.folder ? descendantIds(files, id) : [];
+    const noteIds = f.folder ? inside.filter(x => !files.find(y => y.id === x)?.folder) : [id];
+    const what = f.kind === 'project' ? 'project' : f.folder ? 'folder' : 'note';
+    const question = f.folder && noteIds.length
+      ? `Delete the ${what} "${f.name}" and the ${noteIds.length} ${noteIds.length === 1 ? 'note' : 'notes'} inside it? This can't be undone.`
+      : `Delete the ${what} "${f.name}"? This can't be undone.`;
+    if (!window.confirm(question)) return;
+    const gone = new Set([id, ...inside]);
+    const doomedBlocks = noteIds.flatMap(n => parseBlocks(docs[n] ?? ''));
     const doomedSketches = doomedBlocks.filter(b => b.t === 'sketch').map(b => b.id);
     const doomedImages = doomedBlocks.filter(b => b.t === 'image' && b.src.startsWith('img:')).map(b => b.src.slice(4));
-    setFiles(fs => fs.filter(x => x.id !== id));
-    setDocs(d => { const out = { ...d }; delete out[id]; return out; });
+    setFiles(fs => fs.filter(x => !gone.has(x.id)));
+    setDocs(d => { const out = { ...d }; for (const n of noteIds) delete out[n]; return out; });
+    setCollapsed(c => { const out = { ...c }; for (const g of gone) delete out[g]; return out; });
     setSketches(s => {
       const out = { ...s };
       for (const sk of doomedSketches) delete out[sk];
@@ -636,11 +701,11 @@ export default function App() {
       for (const im of doomedImages) delete out[im];
       return out;
     });
-    setDecks(d => { const out = { ...d }; delete out[id]; return out; });
-    setOpenTabs(t => t.filter(x => x !== id));
-    if (activeFile === id) {
-      const rest = openTabs.filter(x => x !== id);
-      setActiveFile(rest[0] ?? firstNoteId(files, id));
+    setDecks(d => { const out = { ...d }; for (const n of noteIds) delete out[n]; return out; });
+    setOpenTabs(t => t.filter(x => !gone.has(x)));
+    if (gone.has(activeFile)) {
+      const rest = openTabs.filter(x => !gone.has(x));
+      setActiveFile(rest[0] ?? files.find(x => !x.folder && !gone.has(x.id))?.id ?? null);
     }
   };
 
@@ -910,7 +975,7 @@ export default function App() {
         onDelete={() => activeNote && deleteNote(activeNote.id)}
         onInsertSketch={() => activeNote && insertSketch(activeNote.id)}
         onCreateSketch={createSketch}
-        onNewNote={newNote}
+        onNewNote={() => newNote(null)}
         spell={settings.spell} grid={theme.grid} paper={theme.paper}
         richEditor={settings.richEditor !== false}
         sketches={sketches} setSketchData={setSketchData}
@@ -1025,7 +1090,18 @@ export default function App() {
         )}
 
         {!focusMode && view === 'editor' && sidebarOpen && (
-          <Sidebar files={files} activeFile={activeFile} collapsed={collapsed} onOpen={openFile} onNewNote={newNote} onNewProject={(name) => createVaultFolder(name, null, 'project')} onNewFolder={(name, parent) => createVaultFolder(name, parent, 'folder')} onMoveNote={moveNoteToFolder} onDelete={deleteNote} />
+          <Sidebar
+            files={files} activeFile={activeFile} collapsed={collapsed}
+            onOpen={openFile}
+            onToggle={(id) => setCollapsed(c => ({ ...c, [id]: !c[id] }))}
+            onSetCollapsed={setCollapsed}
+            onNewNote={newNote}
+            onCreateFolder={createVaultFolder}
+            onMove={moveItem}
+            onRename={renameFile}
+            onDuplicate={duplicateNote}
+            onDelete={deleteNote}
+          />
         )}
 
         <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', background: '#1e2025', position: 'relative' }}>
