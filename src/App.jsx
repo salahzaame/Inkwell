@@ -5,7 +5,7 @@ import {
 import { askAssistant, buildVaultContext, describeProviderFailures, proposeNoteEdits } from './assistant.js';
 import { EDIT_TOOLS_PROMPT, applyProposal, parseEditProposals } from './assistant-edits.js';
 import { parseBlocks, stripInline, extractWikiNames } from './markdown.jsx';
-import { loadHighlightStore, findHighlight, paperIdOf } from './highlights.js';
+import { loadHighlightStore, findHighlight, paperIdOf, removeHighlightFromDoc } from './highlights.js';
 import { normalizeSearchQuery, saveSearchQuery } from './references.js';
 import { buildEvidenceMatrix, buildLiteratureMap } from './research-artifacts.js';
 import { generateDeckSpec } from './deck/generate.js';
@@ -400,10 +400,27 @@ export default function App() {
     if (workspaceLayout === 'pdf') setWorkspaceLayout('split');
   };
 
+  /** Remove a highlight from the paper and from every note that quotes or links it. */
   const removeHighlight = (id) => {
     if (!activePdf) return;
     const pid = activePdf.paperId;
     setHighlights(s => ({ ...s, [pid]: (s[pid] || []).filter(h => h.id !== id) }));
+    const next = { ...docs };
+    const freed = [];
+    const touched = [];
+    for (const [noteId, text] of Object.entries(docs)) {
+      const { doc, images: gone } = removeHighlightFromDoc(text, id);
+      if (doc === text) continue;
+      next[noteId] = doc;
+      touched.push(noteId);
+      freed.push(...gone);
+    }
+    if (!touched.length) return;
+    setDocs(next);
+    setFiles(fs => fs.map(f => (touched.includes(f.id) ? { ...f, mtime: Date.now() } : f)));
+    // a clip's picture goes with it, unless another note still shows it
+    const orphans = freed.filter(img => !Object.values(next).some(d => d.includes(`img:${img}`)));
+    if (orphans.length) setImages(s => { const out = { ...s }; for (const img of orphans) delete out[img]; return out; });
   };
 
   // clicking a hl:// backlink in any note jumps back to the exact spot in the paper
