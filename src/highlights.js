@@ -1,5 +1,5 @@
 // Highlight store for PDF papers.
-// Shape in localStorage 'inkwell:highlights': { [paperId]: Highlight[] }
+// Shape in the vault's `highlights` collection: { [paperId]: Highlight[] }
 // Highlight: { id, page, text, color, rects: [{ page, x, y, w, h }], createdAt }
 // rects are fractions (0..1) of the page box, so they survive any zoom level.
 
@@ -12,14 +12,6 @@ export const MARKERS = {
 /** Stable identity for a paper: citation key when known, else its URL/file name. */
 export function paperIdOf({ citationKey, url, title } = {}) {
   return citationKey || url || (title ? 'local:' + title : null);
-}
-
-export function loadHighlightStore() {
-  try {
-    return JSON.parse(localStorage.getItem('inkwell:highlights')) || {};
-  } catch {
-    return {};
-  }
 }
 
 export function newHighlightId() {

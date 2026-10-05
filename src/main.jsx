@@ -5,8 +5,13 @@ import './styles.css';
 
 // The app (with its heavy Excalidraw bundle) is only loaded once you enter it,
 // so the landing page stays fast. Routing is hash-based — no server config,
-// works on any static host.
-const App = lazy(() => import('./App.jsx'));
+// works on any static host. The vault is opened alongside, and the app is
+// handed it already loaded: it never reads storage itself.
+const App = lazy(async () => {
+  const [{ default: InkwellApp }, { openVault }] = await Promise.all([import('./App.jsx'), import('./data/index.js')]);
+  const { store, vault } = await openVault();
+  return { default: () => <InkwellApp store={store} initial={vault} /> };
+});
 
 const subscribe = (cb) => {
   window.addEventListener('hashchange', cb);

@@ -1,11 +1,12 @@
 import { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
-  INITIAL_FILES, INITIAL_DOCS, INITIAL_MSGS, buildInitialSketches, legacySketchToScene,
+  INITIAL_FILES, INITIAL_DOCS, INITIAL_MSGS, buildInitialSketches,
 } from './data.js';
 import { askAssistant, buildVaultContext, describeProviderFailures, proposeNoteEdits } from './assistant.js';
 import { EDIT_TOOLS_PROMPT, applyProposal, parseEditProposals } from './assistant-edits.js';
 import { parseBlocks, stripInline, extractWikiNames } from './markdown.jsx';
-import { loadHighlightStore, findHighlight, paperIdOf, removeHighlightFromDoc } from './highlights.js';
+import { findHighlight, paperIdOf, removeHighlightFromDoc } from './highlights.js';
+import { readPref, readRawPref, writePref, writeRawPref } from './data/prefs.js';
 import { normalizeSearchQuery, saveSearchQuery } from './references.js';
 import { buildEvidenceMatrix, buildLiteratureMap } from './research-artifacts.js';
 import { generateDeckSpec } from './deck/generate.js';
@@ -41,28 +42,6 @@ function FeatureLoading({ label = 'Opening workspace…' }) {
   return <div style={{ flex: 1, display: 'grid', placeItems: 'center', color: 'var(--ink-3)', fontSize: '13px' }}>{label}</div>;
 }
 
-const saved = (() => {
-  try {
-    const v3 = JSON.parse(localStorage.getItem('inkwell:v3'));
-    if (v3) return v3;
-  } catch { /* fall through to migration */ }
-  try {
-    const v2 = JSON.parse(localStorage.getItem('inkwell:v2'));
-    if (v2) {
-      return {
-        files: v2.files,
-        docs: v2.docs,
-        settings: v2.settings,
-        theme: v2.theme && { accent: v2.theme.accent, grid: v2.theme.grid !== 'plain' },
-        sketches: v2.sketches && Object.fromEntries(
-          Object.entries(v2.sketches).map(([k, shapes]) => [k, legacySketchToScene(shapes)]),
-        ),
-      };
-    }
-  } catch { /* corrupted legacy store — start fresh */ }
-  return {};
-})();
-
 /** Build present slides from a note's markdown: title slide, then one per ## section. */
 function buildSlides(name, crumb, doc) {
   const slides = [{ type: 'title', title: name, sub: crumb }];
@@ -81,7 +60,8 @@ function buildSlides(name, crumb, doc) {
   return slides;
 }
 
-export default function App() {
+export default function App({ store, initial = {} }) {
+  const saved = initial;
   // Resume where the last session left off, rather than opening the first note in
   // file order every time. Read once — recomputing per render would re-hit
   // localStorage constantly and fight the session writer below.
@@ -104,12 +84,8 @@ export default function App() {
   const [activeFile, setActiveFile] = useState(restored.noteId);
   const [openTabs, setOpenTabs] = useState(restored.tabs);
   // which folders are folded, kept across sessions as the reader left them
-  const [collapsed, setCollapsed] = useState(() => {
-    try { return JSON.parse(localStorage.getItem('inkwell:collapsed')) || {}; } catch { return {}; }
-  });
-  useEffect(() => {
-    try { localStorage.setItem('inkwell:collapsed', JSON.stringify(collapsed)); } catch { /* private mode */ }
-  }, [collapsed]);
+  const [collapsed, setCollapsed] = useState(() => readPref('inkwell:collapsed', {}) || {});
+  useEffect(() => { writePref('inkwell:collapsed', collapsed); }, [collapsed]);
 
   const [switcherOpen, setSwitcherOpen] = useState(false);
   const [query, setQuery] = useState('');
@@ -118,9 +94,7 @@ export default function App() {
   const [theme, setTheme] = useState({ accent: '#fbbf24', grid: true, paper: true, ...(saved.theme || {}) });
   // the lamp: one light model, three settings. Persisted on its own key so it
   // survives vault import/export, which carries documents rather than room state.
-  const [lamp, setLamp] = useState(() => {
-    try { return normalizeLamp(localStorage.getItem('inkwell.lamp')); } catch { return DEFAULT_LAMP; }
-  });
+  const [lamp, setLamp] = useState(() => normalizeLamp(readRawPref('inkwell.lamp', DEFAULT_LAMP)));
 
   const [slideTemplate, setSlideTemplate] = useState('dark');
   const [importNote, setImportNote] = useState(false);
@@ -139,37 +113,19 @@ export default function App() {
   const [researchOpen, setResearchOpen] = useState(false);
   const [activePdf, setActivePdf] = useState(null); // { url?, localData?, title, citationKey, paperId, noteId }
   // which literature note belongs to which paper — keeps local PDFs reattachable
-  const [paperNotes, setPaperNotes] = useState(() => {
-    try {
-      return JSON.parse(localStorage.getItem('inkwell:paper-notes')) || {};
-    } catch {
-      return {};
-    }
-  });
-  const [highlights, setHighlights] = useState(loadHighlightStore);
+  const [paperNotes, setPaperNotes] = useState(saved.paperNotes ?? {});
+  const [highlights, setHighlights] = useState(saved.highlights ?? {});
   const [jumpHl, setJumpHl] = useState(null);
   const [focusMode, setFocusMode] = useState(false);
   const [workspaceLayout, setWorkspaceLayout] = useState('split'); // 'split' | 'pdf' | 'editor'
   const [workspaceRatio, setWorkspaceRatio] = useState(() => {
-    const savedRatio = Number(localStorage.getItem('inkwell:workspace-ratio'));
+    const savedRatio = Number(readRawPref('inkwell:workspace-ratio', 0.5));
     return savedRatio >= 0.28 && savedRatio <= 0.72 ? savedRatio : 0.5;
   });
-  const [references, setReferences] = useState(() => {
-    try {
-      const refs = JSON.parse(localStorage.getItem('inkwell:references'));
-      return refs || [];
-    } catch {
-      return [];
-    }
-  });
-  const [savedSearches, setSavedSearches] = useState(() => {
-    try {
-      const searches = JSON.parse(localStorage.getItem('inkwell:saved-searches'));
-      return Array.isArray(searches) ? searches.map(normalizeSearchQuery).filter(Boolean).slice(0, 16) : [];
-    } catch {
-      return [];
-    }
-  });
+  const [references, setReferences] = useState(() => (Array.isArray(saved.references) ? saved.references : []));
+  const [savedSearches, setSavedSearches] = useState(() => (
+    Array.isArray(saved.savedSearches) ? saved.savedSearches.map(normalizeSearchQuery).filter(Boolean).slice(0, 16) : []
+  ));
 
   // remember where this session got to, so the next one resumes.
   // scroll is a ref, not state — it changes constantly and must not re-render.
@@ -186,28 +142,10 @@ export default function App() {
   // before paint, so the room is never briefly the wrong colour
   useLayoutEffect(() => {
     applyLamp(document.documentElement, lamp, theme.accent);
-    try { localStorage.setItem('inkwell.lamp', lamp); } catch { /* private mode */ }
+    writeRawPref('inkwell.lamp', lamp);
   }, [lamp, theme.accent]);
 
-  useEffect(() => {
-    localStorage.setItem('inkwell:references', JSON.stringify(references));
-  }, [references]);
-
-  useEffect(() => {
-    localStorage.setItem('inkwell:saved-searches', JSON.stringify(savedSearches));
-  }, [savedSearches]);
-
-  useEffect(() => {
-    localStorage.setItem('inkwell:highlights', JSON.stringify(highlights));
-  }, [highlights]);
-
-  useEffect(() => {
-    localStorage.setItem('inkwell:paper-notes', JSON.stringify(paperNotes));
-  }, [paperNotes]);
-
-  useEffect(() => {
-    localStorage.setItem('inkwell:workspace-ratio', String(workspaceRatio));
-  }, [workspaceRatio]);
+  useEffect(() => { writeRawPref('inkwell:workspace-ratio', workspaceRatio); }, [workspaceRatio]);
 
   /** Save a paper to the library (reading queue) and give it a literature note.
       Returns the lit note's id so callers can bind to it without waiting on state. */
@@ -465,15 +403,13 @@ export default function App() {
   // the reader is bound to its paper's note — any other note gets the full width
   const pdfHere = Boolean(activePdf && activeFile === activePdf.noteId);
 
-  // debounced persistence — sketch drags update state at pointer-move rate
+  // every change goes to the store, which saves only what changed, after a short
+  // pause: sketch drags update state at pointer-move rate
   useEffect(() => {
-    const t = setTimeout(() => {
-      try {
-        localStorage.setItem('inkwell:v3', JSON.stringify({ files, docs, sketches, images, decks, graphPositions, settings, theme }));
-      } catch { /* storage unavailable — the vault just won't persist */ }
-    }, 250);
-    return () => clearTimeout(t);
-  }, [files, docs, sketches, images, decks, graphPositions, settings, theme]);
+    store?.update({ files, docs, sketches, images, decks, graphPositions, settings, theme, references, highlights, paperNotes, savedSearches });
+  }, [store, files, docs, sketches, images, decks, graphPositions, settings, theme, references, highlights, paperNotes, savedSearches]);
+  const [saveState, setSaveState] = useState(() => store?.status() ?? { status: 'unsaved' });
+  useEffect(() => store?.subscribe(setSaveState), [store]);
 
   const activeNote = files.find(f => f.id === activeFile && !f.folder) || null;
   const activeDoc = activeNote ? (docs[activeNote.id] ?? '') : '';
@@ -1190,7 +1126,7 @@ export default function App() {
             )}
           </div>
 
-          {!focusMode && <StatusBar doc={activeDoc} hasNote={!!activeNote} />}
+          {!focusMode && <StatusBar doc={activeDoc} hasNote={!!activeNote} save={saveState} />}
         </div>
 
         {!focusMode && aiOpen && (
@@ -1215,7 +1151,8 @@ export default function App() {
       {settingsOpen && (
         <SettingsModal
           settings={settings} setSettings={setSettings} theme={theme} setTheme={setTheme} lamp={lamp}
-          vault={{ files, docs, sketches, images, decks, settings, theme }}
+          vault={{ files, docs, sketches, images, decks, graphPositions, settings, theme, references, highlights, paperNotes, savedSearches }}
+          onImportVault={async (data) => { await store?.replace(data); window.location.reload(); }}
           onClose={() => setSettingsOpen(false)}
         />
       )}

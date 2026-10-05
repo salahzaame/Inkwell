@@ -23,7 +23,7 @@ function Row({ title, sub, right, onClick, last }) {
 
 const SECTION = { fontSize: '11px', fontWeight: 600, letterSpacing: '.5px', textTransform: 'uppercase', color: '#5b6170', margin: '18px 0 2px' };
 
-export default function SettingsModal({ settings, setSettings, theme, setTheme, lamp, vault, onClose }) {
+export default function SettingsModal({ settings, setSettings, theme, setTheme, lamp, vault, onImportVault, onClose }) {
   const tog = (k) => () => setSettings(s => ({ ...s, [k]: !s[k] }));
 
   const exportVault = () => {
@@ -42,11 +42,8 @@ export default function SettingsModal({ settings, setSettings, theme, setTheme, 
       const data = JSON.parse(text);
       if (!Array.isArray(data.files) || typeof data.docs !== 'object') throw new Error('not a vault file');
       if (!window.confirm('Replace the current vault with the imported one? This overwrites your notes on this device.')) return;
-      localStorage.setItem('inkwell:v3', JSON.stringify({
-        files: data.files, docs: data.docs, sketches: data.sketches ?? {}, settings: data.settings, theme: data.theme,
-      }));
-      window.location.reload();
-    }).catch(() => window.alert('That file doesn\'t look like an Inkwell vault export.'));
+      return onImportVault?.(data);
+    }).catch(() => window.alert('That file doesn\'t look like an Inkwell vault export, or it could not be saved.'));
   };
 
   const actionBtn = {
