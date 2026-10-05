@@ -3,3 +3,7 @@ dist/
 .claude/settings.local.json
 *.zip
 .vercel/
+
+# local secrets (Supabase keys and the like): never committed
+.env
+.env*.local
