@@ -1,18 +1,21 @@
 import { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
-  INITIAL_FILES, INITIAL_DOCS, INITIAL_MSGS, buildInitialSketches, legacySketchToScene,
+  INITIAL_FILES, INITIAL_DOCS, INITIAL_MSGS, buildInitialSketches,
 } from './data.js';
-import { askAssistant, buildVaultContext, proposeNoteEdits } from './assistant.js';
+import { askAssistant, buildVaultContext, describeProviderFailures, proposeNoteEdits } from './assistant.js';
 import { EDIT_TOOLS_PROMPT, applyProposal, parseEditProposals } from './assistant-edits.js';
 import { parseBlocks, stripInline, extractWikiNames } from './markdown.jsx';
-import { loadHighlightStore, findHighlight, paperIdOf } from './highlights.js';
+import { findHighlight, paperIdOf, removeHighlightFromDoc } from './highlights.js';
+import { readPref, readRawPref, writePref, writeRawPref } from './data/prefs.js';
 import { normalizeSearchQuery, saveSearchQuery } from './references.js';
 import { buildEvidenceMatrix, buildLiteratureMap } from './research-artifacts.js';
 import { generateDeckSpec } from './deck/generate.js';
 import { deckSlideKeys } from './deck/registry.jsx';
 import { deckFromOutlineSlides } from './deck/from-outline.js';
 import { fileToCompressedDataUrl, newImageId } from './images.js';
-import { moveVaultItem, uniqueVaultName } from './vault.js';
+import { loadPaperPdf, savePaperPdf } from './pdf-store.js';
+import { findMoreCopies, orderPdfCandidates } from './pdf-sources.js';
+import { PROJECT_STARTER, canMoveInto, descendantIds, moveVaultItem, uniqueVaultName } from './vault.js';
 import { DEFAULT_LAMP, applyLamp, nextLamp, normalizeLamp } from './lamp.js';
 import { readSession, resolveSession, writeSession } from './session.js';
 import IconRail from './components/IconRail.jsx';
@@ -24,6 +27,8 @@ import QuickSwitcher from './components/QuickSwitcher.jsx';
 import SettingsModal from './components/SettingsModal.jsx';
 import StatusBar from './components/StatusBar.jsx';
 import WorkspaceSplit from './components/WorkspaceSplit.jsx';
+import { ResizableSide } from './components/Sash.jsx';
+import 'katex/dist/katex.min.css';
 
 // These packages pull in PDF.js, Cytoscape, Excalidraw rendering, and the deck runtime.
 // Keep the core note workspace responsive; each capability loads only when opened.
@@ -36,28 +41,6 @@ const PdfViewer = lazy(() => import('./components/PdfViewer.jsx'));
 function FeatureLoading({ label = 'Opening workspace…' }) {
   return <div style={{ flex: 1, display: 'grid', placeItems: 'center', color: 'var(--ink-3)', fontSize: '13px' }}>{label}</div>;
 }
-
-const saved = (() => {
-  try {
-    const v3 = JSON.parse(localStorage.getItem('inkwell:v3'));
-    if (v3) return v3;
-  } catch { /* fall through to migration */ }
-  try {
-    const v2 = JSON.parse(localStorage.getItem('inkwell:v2'));
-    if (v2) {
-      return {
-        files: v2.files,
-        docs: v2.docs,
-        settings: v2.settings,
-        theme: v2.theme && { accent: v2.theme.accent, grid: v2.theme.grid !== 'plain' },
-        sketches: v2.sketches && Object.fromEntries(
-          Object.entries(v2.sketches).map(([k, shapes]) => [k, legacySketchToScene(shapes)]),
-        ),
-      };
-    }
-  } catch { /* corrupted legacy store — start fresh */ }
-  return {};
-})();
 
 /** Build present slides from a note's markdown: title slide, then one per ## section. */
 function buildSlides(name, crumb, doc) {
@@ -77,7 +60,8 @@ function buildSlides(name, crumb, doc) {
   return slides;
 }
 
-export default function App() {
+export default function App({ store, initial = {} }) {
+  const saved = initial;
   // Resume where the last session left off, rather than opening the first note in
   // file order every time. Read once — recomputing per render would re-hit
   // localStorage constantly and fight the session writer below.
@@ -99,7 +83,9 @@ export default function App() {
   const [images, setImages] = useState(saved.images ?? {});
   const [activeFile, setActiveFile] = useState(restored.noteId);
   const [openTabs, setOpenTabs] = useState(restored.tabs);
-  const [collapsed, setCollapsed] = useState({});
+  // which folders are folded, kept across sessions as the reader left them
+  const [collapsed, setCollapsed] = useState(() => readPref('inkwell:collapsed', {}) || {});
+  useEffect(() => { writePref('inkwell:collapsed', collapsed); }, [collapsed]);
 
   const [switcherOpen, setSwitcherOpen] = useState(false);
   const [query, setQuery] = useState('');
@@ -108,9 +94,7 @@ export default function App() {
   const [theme, setTheme] = useState({ accent: '#fbbf24', grid: true, paper: true, ...(saved.theme || {}) });
   // the lamp: one light model, three settings. Persisted on its own key so it
   // survives vault import/export, which carries documents rather than room state.
-  const [lamp, setLamp] = useState(() => {
-    try { return normalizeLamp(localStorage.getItem('inkwell.lamp')); } catch { return DEFAULT_LAMP; }
-  });
+  const [lamp, setLamp] = useState(() => normalizeLamp(readRawPref('inkwell.lamp', DEFAULT_LAMP)));
 
   const [slideTemplate, setSlideTemplate] = useState('dark');
   const [importNote, setImportNote] = useState(false);
@@ -129,37 +113,19 @@ export default function App() {
   const [researchOpen, setResearchOpen] = useState(false);
   const [activePdf, setActivePdf] = useState(null); // { url?, localData?, title, citationKey, paperId, noteId }
   // which literature note belongs to which paper — keeps local PDFs reattachable
-  const [paperNotes, setPaperNotes] = useState(() => {
-    try {
-      return JSON.parse(localStorage.getItem('inkwell:paper-notes')) || {};
-    } catch {
-      return {};
-    }
-  });
-  const [highlights, setHighlights] = useState(loadHighlightStore);
+  const [paperNotes, setPaperNotes] = useState(saved.paperNotes ?? {});
+  const [highlights, setHighlights] = useState(saved.highlights ?? {});
   const [jumpHl, setJumpHl] = useState(null);
   const [focusMode, setFocusMode] = useState(false);
   const [workspaceLayout, setWorkspaceLayout] = useState('split'); // 'split' | 'pdf' | 'editor'
   const [workspaceRatio, setWorkspaceRatio] = useState(() => {
-    const savedRatio = Number(localStorage.getItem('inkwell:workspace-ratio'));
+    const savedRatio = Number(readRawPref('inkwell:workspace-ratio', 0.5));
     return savedRatio >= 0.28 && savedRatio <= 0.72 ? savedRatio : 0.5;
   });
-  const [references, setReferences] = useState(() => {
-    try {
-      const refs = JSON.parse(localStorage.getItem('inkwell:references'));
-      return refs || [];
-    } catch {
-      return [];
-    }
-  });
-  const [savedSearches, setSavedSearches] = useState(() => {
-    try {
-      const searches = JSON.parse(localStorage.getItem('inkwell:saved-searches'));
-      return Array.isArray(searches) ? searches.map(normalizeSearchQuery).filter(Boolean).slice(0, 16) : [];
-    } catch {
-      return [];
-    }
-  });
+  const [references, setReferences] = useState(() => (Array.isArray(saved.references) ? saved.references : []));
+  const [savedSearches, setSavedSearches] = useState(() => (
+    Array.isArray(saved.savedSearches) ? saved.savedSearches.map(normalizeSearchQuery).filter(Boolean).slice(0, 16) : []
+  ));
 
   // remember where this session got to, so the next one resumes.
   // scroll is a ref, not state — it changes constantly and must not re-render.
@@ -175,29 +141,11 @@ export default function App() {
 
   // before paint, so the room is never briefly the wrong colour
   useLayoutEffect(() => {
-    applyLamp(document.documentElement, lamp);
-    try { localStorage.setItem('inkwell.lamp', lamp); } catch { /* private mode */ }
-  }, [lamp]);
+    applyLamp(document.documentElement, lamp, theme.accent);
+    writeRawPref('inkwell.lamp', lamp);
+  }, [lamp, theme.accent]);
 
-  useEffect(() => {
-    localStorage.setItem('inkwell:references', JSON.stringify(references));
-  }, [references]);
-
-  useEffect(() => {
-    localStorage.setItem('inkwell:saved-searches', JSON.stringify(savedSearches));
-  }, [savedSearches]);
-
-  useEffect(() => {
-    localStorage.setItem('inkwell:highlights', JSON.stringify(highlights));
-  }, [highlights]);
-
-  useEffect(() => {
-    localStorage.setItem('inkwell:paper-notes', JSON.stringify(paperNotes));
-  }, [paperNotes]);
-
-  useEffect(() => {
-    localStorage.setItem('inkwell:workspace-ratio', String(workspaceRatio));
-  }, [workspaceRatio]);
+  useEffect(() => { writeRawPref('inkwell:workspace-ratio', workspaceRatio); }, [workspaceRatio]);
 
   /** Save a paper to the library (reading queue) and give it a literature note.
       Returns the lit note's id so callers can bind to it without waiting on state. */
@@ -248,22 +196,47 @@ export default function App() {
     for (const item of items) importReference(item, { open: false });
   };
 
+  /** What the reader needs for a library paper: its copies, free repositories
+      first and blocking publishers last, and the attached file when there is one. */
+  const readerFor = (ref, noteId, localData = null) => ({
+    url: ref.pdfUrl || null,
+    urls: orderPdfCandidates([...(ref.pdfCandidates || []), ref.pdfUrl]),
+    landing: ref.url, doi: ref.doi,
+    localData,
+    title: ref.title, citationKey: ref.citationKey, paperId: paperIdOf(ref), noteId,
+  });
+
+  /** Keep a PDF the reader fetched by hand with its paper, and read from it. */
+  const attachPdf = async (ref, file, pid = paperIdOf(ref)) => {
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    const kept = await savePaperPdf(pid, bytes);
+    if (kept) setReferences(rs => rs.map(r => (paperIdOf(r) === pid ? { ...r, hasLocalPdf: true } : r)));
+    if (activePdf?.paperId === pid) setActivePdf(p => (p?.paperId === pid ? { ...p, localData: bytes } : p));
+    else await openPaper({ ...ref, hasLocalPdf: kept }, { localData: bytes });
+    if (!kept) alert('The paper is open, but this browser would not keep a copy (storage is blocked or full), so it will need attaching again next time.');
+  };
+
   /** Open a paper in the reader; queue status moves to "reading". Papers straight
       from search get imported first, in the same tick, so the note never doubles.
       The paper opens ONTO its own literature note — other notes stay full-width. */
-  const openPaper = (ref) => {
-    if (!ref.pdfUrl) return;
+  const openPaper = async (ref, { localData = null } = {}) => {
+    if (!ref.pdfUrl && !ref.hasLocalPdf && !localData) return;
     const pid = paperIdOf(ref);
     const inLibrary = references.some(r => paperIdOf(r) === pid);
     const noteId = inLibrary
       ? ensurePaperNote({ paperId: pid, title: ref.title, citationKey: ref.citationKey })
       : importReference(ref);
-    setActivePdf({
-      url: ref.pdfUrl,
-      urls: ref.pdfCandidates?.length ? ref.pdfCandidates : [ref.pdfUrl],
-      landing: ref.url,
-      title: ref.title, citationKey: ref.citationKey, paperId: pid, noteId,
-    });
+    // a copy the reader attached earlier opens at once, and never hits the publisher
+    const stored = localData ?? (ref.hasLocalPdf ? await loadPaperPdf(pid) : null);
+    if (ref.hasLocalPdf && !stored) {
+      // site data was cleared: forget the attachment, fall back to the web copies
+      setReferences(rs => rs.map(r => (paperIdOf(r) === pid ? { ...r, hasLocalPdf: false } : r)));
+      if (!ref.pdfUrl) {
+        alert('The PDF attached to this paper is no longer in this browser (its site data was cleared). Attach it again from the reading queue.');
+        return;
+      }
+    }
+    setActivePdf(readerFor(ref, noteId, stored));
     setReferences(rs => rs.map(r => (paperIdOf(r) === pid
       ? { ...r, status: r.status === 'done' ? 'done' : 'reading', lastOpenedAt: Date.now() }
       : r)));
@@ -281,6 +254,8 @@ export default function App() {
     const title = file.name.replace(/\.pdf$/i, '');
     const pid = 'local:' + file.name;
     const noteId = ensurePaperNote({ paperId: pid, title });
+    // kept, so its highlight links still open it after a reload
+    savePaperPdf(pid, bytes);
     setActivePdf({ localData: bytes, title, citationKey: null, paperId: pid, noteId });
     setOpenTabs(t => (t.includes(noteId) ? t : [...t, noteId]));
     setActiveFile(noteId);
@@ -339,14 +314,23 @@ export default function App() {
   };
 
   /** A fresh highlight lands in the store AND as a quote block in the paper's note. */
-  const addHighlight = (hl) => {
+  // A clip (a formula or figure boxed on the page) arrives with its picture and
+  // lands as an image; the picture lives in the vault, not the highlight store.
+  const addHighlight = ({ image, ...hl }) => {
     if (!activePdf) return;
     const pid = activePdf.paperId;
     setHighlights(s => ({ ...s, [pid]: [...(s[pid] || []), hl] }));
     const noteId = ensurePaperNote(activePdf);
-    const quoteText = hl.text.length > 420 ? hl.text.slice(0, 417) + '…' : hl.text;
     const label = activePdf.citationKey ? `@${activePdf.citationKey}, p. ${hl.page}` : `p. ${hl.page}`;
-    const block = `\n> "${quoteText}"\n> — [${label}](hl://${hl.id})\n`;
+    let block;
+    if (image) {
+      const imgId = newImageId();
+      setImageData(imgId, image);
+      block = `\n![](img:${imgId})\n\n— [${label}](hl://${hl.id})\n`;
+    } else {
+      const quoteText = hl.text.length > 420 ? hl.text.slice(0, 417) + '…' : hl.text;
+      block = `\n> "${quoteText}"\n> — [${label}](hl://${hl.id})\n`;
+    }
     setDocs(d => ({ ...d, [noteId]: (d[noteId] ?? '').replace(/\n*$/, '\n') + block }));
     setFiles(f => f.map(x => (x.id === noteId ? { ...x, mtime: Date.now() } : x)));
     setOpenTabs(t => (t.includes(noteId) ? t : [...t, noteId]));
@@ -354,15 +338,32 @@ export default function App() {
     if (workspaceLayout === 'pdf') setWorkspaceLayout('split');
   };
 
+  /** Remove a highlight from the paper and from every note that quotes or links it. */
   const removeHighlight = (id) => {
     if (!activePdf) return;
     const pid = activePdf.paperId;
     setHighlights(s => ({ ...s, [pid]: (s[pid] || []).filter(h => h.id !== id) }));
+    const next = { ...docs };
+    const freed = [];
+    const touched = [];
+    for (const [noteId, text] of Object.entries(docs)) {
+      const { doc, images: gone } = removeHighlightFromDoc(text, id);
+      if (doc === text) continue;
+      next[noteId] = doc;
+      touched.push(noteId);
+      freed.push(...gone);
+    }
+    if (!touched.length) return;
+    setDocs(next);
+    setFiles(fs => fs.map(f => (touched.includes(f.id) ? { ...f, mtime: Date.now() } : f)));
+    // a clip's picture goes with it, unless another note still shows it
+    const orphans = freed.filter(img => !Object.values(next).some(d => d.includes(`img:${img}`)));
+    if (orphans.length) setImages(s => { const out = { ...s }; for (const img of orphans) delete out[img]; return out; });
   };
 
   // clicking a hl:// backlink in any note jumps back to the exact spot in the paper
   useEffect(() => {
-    const onJump = (e) => {
+    const onJump = async (e) => {
       const id = e.detail?.id;
       const found = findHighlight(highlights, id);
       if (!found) return;
@@ -377,18 +378,17 @@ export default function App() {
         setJumpHl(id);
         return;
       }
-      const ref = references.find(r => paperIdOf(r) === pid);
-      if (!ref?.pdfUrl) {
-        alert('This highlight lives in a local PDF — open that file in the reader first, then the link will jump to it.');
+      const ref = references.find(r => paperIdOf(r) === pid)
+        ?? (pid.startsWith('local:') ? { title: pid.slice(6).replace(/\.pdf$/i, ''), localPid: pid } : null);
+      const stored = await loadPaperPdf(pid);
+      if (!ref || (!ref.pdfUrl && !stored)) {
+        alert('This highlight lives in a PDF this browser no longer has — open or attach that file in the reader again, then the link will jump to it.');
         return;
       }
       const noteId = ensurePaperNote({ paperId: pid, title: ref.title, citationKey: ref.citationKey });
-      setActivePdf({
-        url: ref.pdfUrl,
-        urls: ref.pdfCandidates?.length ? ref.pdfCandidates : [ref.pdfUrl],
-        landing: ref.url,
-        title: ref.title, citationKey: ref.citationKey, paperId: pid, noteId,
-      });
+      setActivePdf(ref.localPid
+        ? { localData: stored, title: ref.title, citationKey: null, paperId: pid, noteId }
+        : readerFor(ref, noteId, stored));
       setOpenTabs(t => (t.includes(noteId) ? t : [...t, noteId]));
       setActiveFile(noteId);
       setSidebarOpen(false);
@@ -403,15 +403,13 @@ export default function App() {
   // the reader is bound to its paper's note — any other note gets the full width
   const pdfHere = Boolean(activePdf && activeFile === activePdf.noteId);
 
-  // debounced persistence — sketch drags update state at pointer-move rate
+  // every change goes to the store, which saves only what changed, after a short
+  // pause: sketch drags update state at pointer-move rate
   useEffect(() => {
-    const t = setTimeout(() => {
-      try {
-        localStorage.setItem('inkwell:v3', JSON.stringify({ files, docs, sketches, images, decks, graphPositions, settings, theme }));
-      } catch { /* storage unavailable — the vault just won't persist */ }
-    }, 250);
-    return () => clearTimeout(t);
-  }, [files, docs, sketches, images, decks, graphPositions, settings, theme]);
+    store?.update({ files, docs, sketches, images, decks, graphPositions, settings, theme, references, highlights, paperNotes, savedSearches });
+  }, [store, files, docs, sketches, images, decks, graphPositions, settings, theme, references, highlights, paperNotes, savedSearches]);
+  const [saveState, setSaveState] = useState(() => store?.status() ?? { status: 'unsaved' });
+  useEffect(() => store?.subscribe(setSaveState), [store]);
 
   const activeNote = files.find(f => f.id === activeFile && !f.folder) || null;
   const activeDoc = activeNote ? (docs[activeNote.id] ?? '') : '';
@@ -522,7 +520,6 @@ export default function App() {
     const id = 'n' + Date.now();
     setFiles(fs => [...fs, { id, name, top: true, mtime: Date.now() }]);
     setDocs(d => ({ ...d, [id]: '' }));
-    if (parent) setCollapsed(current => ({ ...current, [parent]: false }));
     setActiveFile(id);
     setView('editor');
     setOpenTabs(t => [...t, id]);
@@ -541,37 +538,88 @@ export default function App() {
     });
   };
 
-  const newNote = (parent = null) => {
-    const id = 'n' + Date.now();
-    const name = uniqueVaultName(files, 'Untitled', parent);
-    setFiles(f => [...f, { id, name, parent: parent || undefined, top: !parent, mtime: Date.now() }]);
-    setDocs(d => ({ ...d, [id]: '' }));
+  const vaultId = (prefix) => `${prefix}${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`;
+
+  /** A new note in `parent` (null: the vault root), opened. Returns its id. */
+  const newNote = (parent = null, name = 'Untitled', body = '') => {
+    const id = vaultId('n');
+    const clean = uniqueVaultName(files, name, parent);
+    setFiles(f => [...f, { id, name: clean, parent: parent || undefined, top: !parent, mtime: Date.now() }]);
+    setDocs(d => ({ ...d, [id]: body }));
+    if (parent) setCollapsed(current => ({ ...current, [parent]: false }));
     setOpenTabs(t => [...t, id]);
     setActiveFile(id);
     setView('editor');
-  };
-
-  const createVaultFolder = (name, parent = null, kind = 'folder') => {
-    const id = `${kind}-${Date.now().toString(36)}`;
-    const clean = uniqueVaultName(files, name || (kind === 'project' ? 'New project' : 'New folder'), parent);
-    setFiles(current => [...current, { id, name: clean, folder: true, kind, parent: parent || undefined, top: !parent, mtime: Date.now() }]);
-    setCollapsed(current => ({ ...current, [id]: false, ...(parent ? { [parent]: false } : {}) }));
     return id;
   };
 
-  const moveNoteToFolder = (noteId, parent) => {
-    if (!noteId || !files.some(file => file.id === noteId && !file.folder)) return;
-    if (parent && !files.some(file => file.id === parent && file.folder)) return;
-    setFiles(current => moveVaultItem(current, noteId, parent));
+  /**
+   * A project or folder. A project made `withStarter` comes with Literature,
+   * Methods and Writing folders and an Overview note, opened, to write in.
+   */
+  const createVaultFolder = (name, parent = null, kind = 'folder', { withStarter = false } = {}) => {
+    const id = vaultId(kind + '-');
+    const now = Date.now();
+    const clean = uniqueVaultName(files, name || (kind === 'project' ? 'New project' : 'New folder'), parent);
+    const made = [{ id, name: clean, folder: true, kind, parent: parent || undefined, top: !parent, mtime: now }];
+    if (withStarter) {
+      PROJECT_STARTER.folders.forEach((folder, i) => made.push({ id: `${id}-f${i}`, name: folder, folder: true, kind: 'folder', parent: id, top: false, mtime: now }));
+      const overviewId = `${id}-overview`;
+      made.push({ id: overviewId, name: `${clean} — Overview`, parent: id, top: false, mtime: now });
+      setDocs(d => ({ ...d, [overviewId]: PROJECT_STARTER.overview(clean) }));
+      setOpenTabs(t => [...t, overviewId]);
+      setActiveFile(overviewId);
+      setView('editor');
+    }
+    setFiles(current => [...current, ...made]);
+    // starter folders start folded: the project opens on its Overview, not three empty rows
+    const folded = Object.fromEntries(made.filter(f => f.folder && f.id !== id).map(f => [f.id, true]));
+    setCollapsed(current => ({ ...current, ...folded, [id]: false, ...(parent ? { [parent]: false } : {}) }));
+    return id;
+  };
+
+  /** Move a note or folder into `parent` (null: the vault root), if the tree allows it. */
+  const moveItem = (id, parent) => {
+    if (!canMoveInto(files, id, parent)) return;
+    const item = files.find(f => f.id === id);
+    // a name already taken there gets a number, as a new item would
+    const name = uniqueVaultName(files, item.name, parent, id);
+    setFiles(current => moveVaultItem(current, id, parent).map(f => (f.id === id ? { ...f, name } : f)));
     if (parent) setCollapsed(current => ({ ...current, [parent]: false }));
   };
 
-  /** Rename a note and rewrite [[wikilinks]] pointing at it across the vault. */
+  /** A copy of a note beside it; its sketches and images are copied too, so the two never share one. */
+  const duplicateNote = (id) => {
+    const src = files.find(f => f.id === id && !f.folder);
+    if (!src) return;
+    const newSketches = {};
+    const newImages = {};
+    const body = (docs[id] ?? '')
+      .replace(/^```sketch[ \t]+(\S+)/gm, (line, skId) => {
+        if (!sketches[skId]) return line;
+        const copy = vaultId('sketch-');
+        newSketches[copy] = structuredClone(sketches[skId]);
+        return '```sketch ' + copy;
+      })
+      .replace(/\]\(img:([^)\s]+)\)/g, (ref, imgId) => {
+        if (!images[imgId]) return ref;
+        const copy = newImageId();
+        newImages[copy] = images[imgId];
+        return `](img:${copy})`;
+      });
+    setSketches(s => ({ ...s, ...newSketches }));
+    setImages(s => ({ ...s, ...newImages }));
+    newNote(src.parent || null, `${src.name} copy`, body);
+  };
+
+  /** Rename a note (rewriting [[wikilinks]] to it across the vault), or a folder or project. */
   const renameFile = (id, name) => {
-    const clean = name.trim() || 'Untitled';
     const old = files.find(f => f.id === id);
-    if (!old || old.name === clean) return;
+    if (!old) return;
+    const clean = old.folder ? uniqueVaultName(files, name, old.parent || null, id) : (name.trim() || 'Untitled');
+    if (old.name === clean) return;
     setFiles(f => f.map(x => (x.id === id ? { ...x, name: clean, mtime: Date.now() } : x)));
+    if (old.folder) return; // links point at notes, never at folders
     setDocs(d => {
       const out = {};
       for (const [k, v] of Object.entries(d)) out[k] = v.split('[[' + old.name + ']]').join('[[' + clean + ']]');
@@ -579,15 +627,24 @@ export default function App() {
     });
   };
 
+  /** Delete a note, or a folder or project with everything inside it, after asking. */
   const deleteNote = (id) => {
     const f = files.find(x => x.id === id);
-    if (!f || f.folder) return;
-    if (!window.confirm(`Delete "${f.name}"? This can't be undone.`)) return;
-    const doomedBlocks = parseBlocks(docs[id] ?? '');
+    if (!f) return;
+    const inside = f.folder ? descendantIds(files, id) : [];
+    const noteIds = f.folder ? inside.filter(x => !files.find(y => y.id === x)?.folder) : [id];
+    const what = f.kind === 'project' ? 'project' : f.folder ? 'folder' : 'note';
+    const question = f.folder && noteIds.length
+      ? `Delete the ${what} "${f.name}" and the ${noteIds.length} ${noteIds.length === 1 ? 'note' : 'notes'} inside it? This can't be undone.`
+      : `Delete the ${what} "${f.name}"? This can't be undone.`;
+    if (!window.confirm(question)) return;
+    const gone = new Set([id, ...inside]);
+    const doomedBlocks = noteIds.flatMap(n => parseBlocks(docs[n] ?? ''));
     const doomedSketches = doomedBlocks.filter(b => b.t === 'sketch').map(b => b.id);
     const doomedImages = doomedBlocks.filter(b => b.t === 'image' && b.src.startsWith('img:')).map(b => b.src.slice(4));
-    setFiles(fs => fs.filter(x => x.id !== id));
-    setDocs(d => { const out = { ...d }; delete out[id]; return out; });
+    setFiles(fs => fs.filter(x => !gone.has(x.id)));
+    setDocs(d => { const out = { ...d }; for (const n of noteIds) delete out[n]; return out; });
+    setCollapsed(c => { const out = { ...c }; for (const g of gone) delete out[g]; return out; });
     setSketches(s => {
       const out = { ...s };
       for (const sk of doomedSketches) delete out[sk];
@@ -598,11 +655,11 @@ export default function App() {
       for (const im of doomedImages) delete out[im];
       return out;
     });
-    setDecks(d => { const out = { ...d }; delete out[id]; return out; });
-    setOpenTabs(t => t.filter(x => x !== id));
-    if (activeFile === id) {
-      const rest = openTabs.filter(x => x !== id);
-      setActiveFile(rest[0] ?? firstNoteId(files, id));
+    setDecks(d => { const out = { ...d }; for (const n of noteIds) delete out[n]; return out; });
+    setOpenTabs(t => t.filter(x => !gone.has(x)));
+    if (gone.has(activeFile)) {
+      const rest = openTabs.filter(x => !gone.has(x));
+      setActiveFile(rest[0] ?? files.find(x => !x.folder && !gone.has(x.id))?.id ?? null);
     }
   };
 
@@ -671,10 +728,10 @@ export default function App() {
       const { text: reply, provider } = await askAssistant({ history, vault, preferLocal: settings.localAi, settings });
       setAiProvider(provider);
       setAiMessages(m => [...m, { role: 'a', text: reply, canApply: true, canReplace }]);
-    } catch {
+    } catch (e) {
       setAiMessages(m => [...m, {
         role: 'a',
-        text: 'I couldn\'t reach a model. Check your internet connection — or run Ollama with a model pulled (e.g. "ollama pull gemma4:12b") and enable "Local assistant" in Settings.',
+        text: describeProviderFailures(e),
       }]);
     } finally {
       setAiTyping(false);
@@ -711,8 +768,8 @@ export default function App() {
         proposals: proposals.map((proposal, i) => ({ id: `${Date.now().toString(36)}-${i}`, proposal, state: 'pending' })),
         skipped,
       }]);
-    } catch {
-      setAiMessages(m => [...m, { role: 'a', text: 'I couldn\'t reach a model to draft those changes. Check your connection, or run Ollama locally and enable "Local assistant" in Settings.' }]);
+    } catch (e) {
+      setAiMessages(m => [...m, { role: 'a', text: describeProviderFailures(e) }]);
     } finally {
       setAiTyping(false);
     }
@@ -872,8 +929,9 @@ export default function App() {
         onDelete={() => activeNote && deleteNote(activeNote.id)}
         onInsertSketch={() => activeNote && insertSketch(activeNote.id)}
         onCreateSketch={createSketch}
-        onNewNote={newNote}
+        onNewNote={() => newNote(null)}
         spell={settings.spell} grid={theme.grid} paper={theme.paper}
+        richEditor={settings.richEditor !== false}
         sketches={sketches} setSketchData={setSketchData}
         images={images} setImageData={setImageData}
         initialScrollTop={restored.noteId === activeFile ? restored.scrollTop : 0}
@@ -910,6 +968,12 @@ export default function App() {
         }}
         onClose={() => { setActivePdf(null); setJumpHl(null); }}
         onLocalFile={openLocalPdf}
+        onFindMoreSources={() => findMoreCopies({ doi: activePdf.doi })}
+        onAttachPdf={(file) => attachPdf(
+          references.find(r => paperIdOf(r) === activePdf.paperId) ?? { title: activePdf.title, citationKey: activePdf.citationKey, url: activePdf.landing },
+          file,
+          activePdf.paperId,
+        )}
       />
     </Suspense>
   );
@@ -953,6 +1017,7 @@ export default function App() {
         )}
 
         {!focusMode && researchOpen && (
+          <ResizableSide id="research" edge="right" defaultWidth={330} min={260} max={720} label="Resize research library" onCollapse={() => setResearchOpen(false)}>
           <Suspense fallback={<FeatureLoading label="Opening research library…" />}><ResearchPanel
             references={references}
             highlights={highlights}
@@ -971,18 +1036,33 @@ export default function App() {
               setView('editor');
             }}
             onLocalPdf={openLocalPdf}
+            onAttachPdf={attachPdf}
             onCreateSynthesis={createLiteratureMap}
             onCreateEvidenceMatrix={createEvidenceMatrix}
             onAskAssistant={(prompt) => { setAiOpen(true); setResearchOpen(false); sendMessage(prompt); }}
             onClose={() => setResearchOpen(false)}
           /></Suspense>
+          </ResizableSide>
         )}
 
         {!focusMode && view === 'editor' && sidebarOpen && (
-          <Sidebar files={files} activeFile={activeFile} collapsed={collapsed} onOpen={openFile} onNewNote={newNote} onNewProject={(name) => createVaultFolder(name, null, 'project')} onNewFolder={(name, parent) => createVaultFolder(name, parent, 'folder')} onMoveNote={moveNoteToFolder} onDelete={deleteNote} />
+          <ResizableSide id="vault" edge="right" defaultWidth={252} min={190} max={520} label="Resize vault" onCollapse={() => setSidebarOpen(false)}>
+          <Sidebar
+            files={files} activeFile={activeFile} collapsed={collapsed}
+            onOpen={openFile}
+            onToggle={(id) => setCollapsed(c => ({ ...c, [id]: !c[id] }))}
+            onSetCollapsed={setCollapsed}
+            onNewNote={newNote}
+            onCreateFolder={createVaultFolder}
+            onMove={moveItem}
+            onRename={renameFile}
+            onDuplicate={duplicateNote}
+            onDelete={deleteNote}
+          />
+          </ResizableSide>
         )}
 
-        <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', background: '#1e2025', position: 'relative' }}>
+        <div data-main-area style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', background: '#1e2025', position: 'relative' }}>
           {focusMode && (
             <div 
               onClick={() => setFocusMode(false)}
@@ -1046,10 +1126,11 @@ export default function App() {
             )}
           </div>
 
-          {!focusMode && <StatusBar doc={activeDoc} hasNote={!!activeNote} />}
+          {!focusMode && <StatusBar doc={activeDoc} hasNote={!!activeNote} save={saveState} />}
         </div>
 
         {!focusMode && aiOpen && (
+          <ResizableSide id="assistant" edge="left" defaultWidth={300} min={260} max={760} label="Resize assistant" onCollapse={() => setAiOpen(false)}>
           <AIPanel
             messages={aiMessages} typing={aiTyping} input={aiInput}
             onInput={setAiInput} onSend={sendMessage} onWiki={openWiki} provider={aiProvider} localAi={settings.localAi}
@@ -1060,6 +1141,7 @@ export default function App() {
             slideLabel={activeDeck?.elements?.[selectedDeckSlide]?.type === 'Slide' ? `slide ${Math.max(1, deckSlideKeys(activeDeck).indexOf(selectedDeckSlide) + 1)}` : null}
             onClose={() => setAiOpen(false)}
           />
+          </ResizableSide>
         )}
       </div>
 
@@ -1069,7 +1151,8 @@ export default function App() {
       {settingsOpen && (
         <SettingsModal
           settings={settings} setSettings={setSettings} theme={theme} setTheme={setTheme} lamp={lamp}
-          vault={{ files, docs, sketches, images, decks, settings, theme }}
+          vault={{ files, docs, sketches, images, decks, graphPositions, settings, theme, references, highlights, paperNotes, savedSearches }}
+          onImportVault={async (data) => { await store?.replace(data); window.location.reload(); }}
           onClose={() => setSettingsOpen(false)}
         />
       )}

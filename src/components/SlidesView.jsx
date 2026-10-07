@@ -9,6 +9,7 @@ import { canMoveDeckElement, moveDeckElement } from '../deck/mutate.js';
 import { appendDeckReferencesSlide, deckCitationKeys } from '../deck/references.js';
 import { addImageBlock, addTwoColumnFrame } from '../deck/compose.js';
 import InteractiveSlideCanvas from './InteractiveSlideCanvas.jsx';
+import { Sash, usePanelWidth } from './Sash.jsx';
 
 /** One bad slide should never take down the whole view. */
 export class SlideBoundary extends Component {
@@ -58,6 +59,10 @@ export default function SlidesView({
   deck, deckBusy, onGenerateDeck, onClearDeck, onUpdateDeck,
   onTemplate, onPresent, onSelectSlide, onImportDeck, onImportSlideImage, onEditOutline,
 }) {
+  // the studio's filmstrip and inspector resize like the app's side bars
+  const [filmWidth, setFilmWidth] = usePanelWidth('deck-filmstrip', 150, 112, 300);
+  const [inspectorWidth, setInspectorWidth] = usePanelWidth('deck-inspector', 220, 180, 420);
+  const stageRoom = () => Math.max(0, (document.querySelector('.deck-stage')?.getBoundingClientRect().width ?? Infinity) - 320);
   const light = template === 'light';
   const thBg = light ? '#f4f1e9' : '#141518';
   const thInk = light ? '#26221a' : '#e8eaf0';
@@ -408,7 +413,10 @@ export default function SlidesView({
           /* ── AI deck thumbnails ── */
           <DeckAssets.Provider value={{ sketches, images: images || {}, references, light: activeDeckTheme.light }}>
             <DeckProviders>
-              <div className="deck-studio">
+              <div className="deck-studio" style={{ '--film-w': `${filmWidth}px`, '--insp-w': `${inspectorWidth}px` }}>
+                {/* on the grid, not in the scrolling columns, so they stay put */}
+                <Sash edge="right" width={filmWidth} min={112} max={300} defaultWidth={150} onWidth={setFilmWidth} room={stageRoom} label="Resize slide navigator" className="deck-sash" style={{ left: 'calc(var(--film-w) - 3px)' }} />
+                <Sash edge="left" width={inspectorWidth} min={180} max={420} defaultWidth={220} onWidth={setInspectorWidth} room={stageRoom} label="Resize inspector" className="deck-sash" style={{ right: 'calc(var(--insp-w) - 3px)' }} />
                 <aside className="deck-filmstrip" aria-label="Slide navigator">
                   <div className="deck-pane-heading"><span>Slides</span><button type="button" onClick={addSlide} title="Add slide">+</button></div>
                   <div className="deck-filmstrip-list">

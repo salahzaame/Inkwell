@@ -14,6 +14,7 @@ function systemPrompt(vault) {
     'When you reference a note, call it by its exact name in double brackets, e.g. [[Weekly Sync]].',
     'If the user asks you to write or draft content, produce clean markdown they can paste into a note. Do not invent papers, quotations, statistics, or citations that are not in the workspace.',
     'Inkwell renders ```mermaid code fences as real diagrams inside notes, and the reader can convert one into an editable Excalidraw sketch. So when asked to draw, diagram, visualise, or map something — a flowchart, architecture, process, timeline, causal chain, or relationship — answer with a ```mermaid fence. Never say you cannot draw, and never suggest pasting the code elsewhere. Keep the diagram to roughly 12 nodes and use flowchart/sequence/state/ER syntax that mermaid 11 accepts.',
+    'Inkwell renders LaTeX math: write inline formulas as $...$ and display formulas as $$...$$ on lines of their own. Never use \\( \\) or \\[ \\] delimiters, and never write formulas as plain text when they are math.',
     'When asked to explain, match the requested level (plain-language or technical) and tie the explanation back to the open note, active slide, or relevant paper when possible.',
     '',
     vault,
@@ -63,7 +64,8 @@ export function buildVaultContext(files, docs, activeId, { references = [], high
     research.push('', `RESEARCH LIBRARY (${references.length} papers):`);
     for (const ref of references.slice(0, 20)) {
       const paperId = ref.citationKey || ref.url || (ref.title ? 'local:' + ref.title : null);
-      const paperHighlights = highlights[paperId] || [];
+      // clipped formulas and figures are pictures: no text to quote
+      const paperHighlights = (highlights[paperId] || []).filter(h => h.text);
       research.push(
         `--- ${ref.title || 'Untitled paper'} ---`,
         `Status: ${ref.status || 'toread'}${ref.year ? ` · ${ref.year}` : ''}${ref.citationKey ? ` · [@${ref.citationKey}]` : ''}`,
@@ -82,9 +84,17 @@ export function pickOllamaModel(models = [], preferred) {
 }
 
 async function askOllama(messages, { model: preferred } = {}) {
-  const tags = await fetch(`${OLLAMA}/api/tags`, { signal: AbortSignal.timeout(1500) }).then(r => r.json());
-  const model = pickOllamaModel(tags.models, preferred);
-  if (!model) throw new Error('ollama has no models pulled');
+  let tagsRes;
+  try {
+    tagsRes = await fetch(`${OLLAMA}/api/tags`, { signal: AbortSignal.timeout(1500) });
+  } catch {
+    throw new Error('not running on this computer (start Ollama, or turn off "Local assistant")');
+  }
+  // Ollama answers 403 to pages it does not trust, e.g. the deployed site
+  if (tagsRes.status === 403) throw new Error(`blocked this site; add ${window.location.origin} to OLLAMA_ORIGINS and restart Ollama`);
+  if (!tagsRes.ok) throw new Error('HTTP ' + tagsRes.status);
+  const model = pickOllamaModel((await tagsRes.json()).models, preferred);
+  if (!model) throw new Error('no model pulled (run "ollama pull gemma4:12b")');
   // Thinking off: on gemma4:12b it turned a 3 s answer into ~90 s of hidden reasoning.
   // num_ctx 8192: Ollama's 4096 default silently truncates the vault context.
   const chat = (body) => fetch(`${OLLAMA}/api/chat`, {
@@ -112,7 +122,10 @@ async function askPollinations(messages, maxTokens) {
     body: JSON.stringify({ model: 'openai', messages, ...(maxTokens ? { max_tokens: maxTokens } : {}) }),
     signal: AbortSignal.timeout(60000),
   });
-  if (!res.ok) throw new Error('pollinations HTTP ' + res.status);
+  if (!res.ok) {
+    const detail = await res.json().then(b => b?.error).catch(() => null);
+    throw new Error(`HTTP ${res.status}${detail ? ` (${String(detail).slice(0, 120)})` : ''}`);
+  }
   const j = await res.json();
   const text = (j.choices?.[0]?.message?.content || '').trim();
   if (!text) throw new Error('pollinations empty reply');
@@ -125,6 +138,10 @@ async function askPollinations(messages, maxTokens) {
 // than 31b; both are the same Gemma 4 family. Override in Settings if desired.
 export const OPENROUTER_DEFAULT_MODEL = 'google/gemma-4-26b-a4b-it:free';
 
+// Free variants OpenRouter has since withdrawn; a saved choice of one fails every request.
+const RETIRED_OPENROUTER_MODELS = new Set(['meta-llama/llama-3.3-70b-instruct:free', 'openai/gpt-oss-20b:free']);
+export const openRouterModel = (model) => (!model || RETIRED_OPENROUTER_MODELS.has(model) ? OPENROUTER_DEFAULT_MODEL : model);
+
 async function askOpenRouter(messages, maxTokens, { key, model }) {
   // OpenRouter allows browser calls with the user's own key (kept in settings)
   const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
@@ -135,7 +152,7 @@ async function askOpenRouter(messages, maxTokens, { key, model }) {
       'HTTP-Referer': window.location.origin,
       'X-Title': 'Inkwell',
     },
-    body: JSON.stringify({ model: model || OPENROUTER_DEFAULT_MODEL, messages, ...(maxTokens ? { max_tokens: maxTokens } : {}) }),
+    body: JSON.stringify({ model: openRouterModel(model), messages, ...(maxTokens ? { max_tokens: maxTokens } : {}) }),
     signal: AbortSignal.timeout(90000),
   });
   const j = await res.json().catch(() => ({}));
@@ -147,7 +164,7 @@ async function askOpenRouter(messages, maxTokens, { key, model }) {
   }
   const text = (j.choices?.[0]?.message?.content || '').trim();
   if (!text) throw new Error('openrouter empty reply');
-  const shortModel = (model || OPENROUTER_DEFAULT_MODEL).split('/').pop().replace(/:free$/, '');
+  const shortModel = openRouterModel(model).split('/').pop().replace(/:free$/, '');
   return { text, provider: shortModel + ' · openrouter', local: false, finishReason: j.choices?.[0]?.finish_reason };
 }
 
@@ -184,29 +201,40 @@ function providerChain({ preferLocal, settings, maxTokens }) {
     : null;
   const poll = (messages) => askPollinations(messages, maxTokens);
   const oll = (messages) => askOllama(messages, { model: settings?.ollamaModel });
-  if (preferLocal) chain.push(oll);
-  if (or) chain.push(or);
-  chain.push(poll);
-  if (!preferLocal) chain.push(oll);
+  if (preferLocal) chain.push({ name: 'Ollama', ask: oll });
+  if (or) chain.push({ name: 'OpenRouter', ask: or });
+  chain.push({ name: 'Free cloud (Pollinations)', ask: poll });
+  if (!preferLocal) chain.push({ name: 'Ollama', ask: oll });
   return chain;
 }
 
 /**
  * Try each provider in order. When the local model was preferred but failed,
  * say so in the provider label: the notes went to the cloud instead.
+ * If every provider fails, the thrown error carries each one's reason in
+ * `failures`, so the reader sees why rather than a generic "couldn't reach".
  */
-async function runChain(chain, messages, preferLocal) {
-  let lastErr, localErr;
-  for (const [i, ask] of chain.entries()) {
+export async function runChain(chain, messages, preferLocal) {
+  const failures = [];
+  for (const [i, { name, ask }] of chain.entries()) {
     try {
       const result = await ask(messages);
+      const localErr = preferLocal && failures.length && i > 0 ? failures[0].reason : null;
       return localErr ? { ...result, provider: `${result.provider} (ollama unavailable)`, localError: localErr } : result;
     } catch (e) {
-      lastErr = e;
-      if (preferLocal && i === 0) localErr = e.message;
+      failures.push({ name, reason: e?.message || String(e) });
     }
   }
-  throw lastErr ?? new Error('no model provider available');
+  const err = new Error(failures.map(f => `${f.name}: ${f.reason}`).join('; ') || 'no model provider available');
+  err.failures = failures;
+  throw err;
+}
+
+/** Reader-facing text for a failed ask: one line per provider and why it failed. */
+export function describeProviderFailures(err) {
+  const failures = err?.failures || [];
+  if (!failures.length) return 'I couldn\'t reach a model. Check your internet connection and try again.';
+  return ['I couldn\'t reach a model. Each provider I tried:', ...failures.map(f => `• ${f.name} — ${f.reason}`)].join('\n');
 }
 
 /** One-shot completion through the provider chain (OpenRouter → pollinations → ollama). */

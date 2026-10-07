@@ -139,6 +139,70 @@ export const LEGACY_ALIASES = {
   '--marker-rose': 'var(--mark-rose)',
 };
 
+/* ── the accent: a hue the reader chooses, at the lamp's own brightness ──
+ *
+ * Amber is the lamp's accent, hand-tuned per setting in the table above. The
+ * other hues are not free colours: each is re-lit to the exact luminance of the
+ * lamp's amber at that setting, for both the chrome accent and the darker ink
+ * used on paper. Contrast depends on luminance alone, so every choice inherits
+ * every ratio amber has (on the chrome, on the page, and for dark button text
+ * set on it), and dims with the lamp the same way amber does. Teal on cream,
+ * the reason the free-choice picker was retired, becomes a dark teal ink.
+ */
+export const ACCENTS = [
+  { id: 'amber', label: 'Amber', hex: '#fbbf24' },
+  { id: 'violet', label: 'Violet', hex: '#a78bfa' },
+  { id: 'teal', label: 'Teal', hex: '#5eead4' },
+  { id: 'rose', label: 'Rose', hex: '#f472b6' },
+  { id: 'blue', label: 'Blue', hex: '#60a5fa' },
+  { id: 'green', label: 'Green', hex: '#4ade80' },
+];
+
+export const DEFAULT_ACCENT = ACCENTS[0].hex;
+
+/** A stored accent, or amber when it is missing or not one of the choices. */
+export function normalizeAccent(hex) {
+  const value = String(hex || '').toLowerCase();
+  return ACCENTS.some(a => a.hex === value) ? value : DEFAULT_ACCENT;
+}
+
+function hexToHsl(hex) {
+  const [r, g, b] = String(hex).replace('#', '').match(/.{2}/g).slice(0, 3).map(h => parseInt(h, 16) / 255);
+  const max = Math.max(r, g, b), min = Math.min(r, g, b), l = (max + min) / 2;
+  if (max === min) return [0, 0, l];
+  const d = max - min;
+  const s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+  const h = max === r ? (g - b) / d + (g < b ? 6 : 0) : max === g ? (b - r) / d + 2 : (r - g) / d + 4;
+  return [h * 60, s, l];
+}
+
+function hslToHex(h, s, l) {
+  const k = n => (n + h / 30) % 12;
+  const a = s * Math.min(l, 1 - l);
+  const f = n => l - a * Math.max(-1, Math.min(k(n) - 3, Math.min(9 - k(n), 1)));
+  return '#' + [f(0), f(8), f(4)].map(v => Math.round(v * 255).toString(16).padStart(2, '0')).join('');
+}
+
+/** The hue of `hex`, at the lightness whose luminance matches `target` (monotonic in lightness). */
+export function relight(hex, target) {
+  const [h, s] = hexToHsl(hex);
+  const want = relativeLuminance(target);
+  let lo = 0, hi = 1;
+  for (let i = 0; i < 30; i++) {
+    const mid = (lo + hi) / 2;
+    if (relativeLuminance(hslToHex(h, s, mid)) < want) lo = mid; else hi = mid;
+  }
+  return hslToHex(h, s, (lo + hi) / 2);
+}
+
+/** --acc and --acc-page for an accent at a setting; empty for amber, which the table already defines. */
+export function accentTokens(accent, setting) {
+  const hex = normalizeAccent(accent);
+  if (hex === DEFAULT_ACCENT) return {};
+  const t = LAMP_TOKENS[normalizeLamp(setting)];
+  return { '--acc': relight(hex, t['--acc']), '--acc-page': relight(hex, t['--acc-page']) };
+}
+
 export const DEFAULT_LAMP = 'daylight';
 
 export function normalizeLamp(value) {
@@ -150,15 +214,15 @@ export function nextLamp(value) {
   return LAMPS[(LAMPS.indexOf(normalizeLamp(value)) + 1) % LAMPS.length];
 }
 
-/** Every custom property for a setting: lamp tokens, fixed colours, then aliases. */
-export function lampVars(setting) {
-  return { ...LAMP_TOKENS[normalizeLamp(setting)], ...FIXED_TOKENS, ...LEGACY_ALIASES };
+/** Every custom property for a setting: lamp tokens, the chosen accent, fixed colours, then aliases. */
+export function lampVars(setting, accent) {
+  return { ...LAMP_TOKENS[normalizeLamp(setting)], ...accentTokens(accent, setting), ...FIXED_TOKENS, ...LEGACY_ALIASES };
 }
 
 /** Write a setting onto an element's inline custom properties (normally :root). */
-export function applyLamp(element, setting) {
+export function applyLamp(element, setting, accent) {
   if (!element?.style) return;
-  const vars = lampVars(setting);
+  const vars = lampVars(setting, accent);
   for (const [name, value] of Object.entries(vars)) element.style.setProperty(name, value);
   element.dataset.lamp = normalizeLamp(setting);
 }

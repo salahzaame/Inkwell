@@ -1,7 +1,7 @@
-import { useEffect, useRef, useState } from 'react';
+import { Component, useEffect, useRef, useState } from 'react';
 import { convertToExcalidrawElements } from '@excalidraw/excalidraw';
 import { fmtEdited } from '../data.js';
-import { parseBlocks, Inline, toggleTaskInDoc, extractTags, findMentions } from '../markdown.jsx';
+import { parseBlocks, Inline, MathView, toggleTaskInDoc, extractTags, findMentions } from '../markdown.jsx';
 import { fileToCompressedDataUrl, newImageId } from '../images.js';
 import { BIBLIOGRAPHY_STYLES, generateBibliography } from '../bibliography.js';
 import { wikilinkEditorHtml } from '../wiki-editor.js';
@@ -9,6 +9,7 @@ import { addTableRowToDoc, updateTableCellInDoc } from '../tables.js';
 import { MERMAID_SNIPPET, diagramErrorMessage, isMermaidBlock, replaceBlockWithSketchFence } from '../diagrams.js';
 import SketchCanvas from './SketchCanvas.jsx';
 import MermaidDiagram from './MermaidDiagram.jsx';
+import NoteBody from './NoteBody.jsx';
 
 /* ── palettes: warm "paper" page (Inkwell's signature) vs classic dark ── */
 // Both palettes read the lamp's tokens, so the page moves with the room rather
@@ -63,6 +64,29 @@ function caretPos(ta) {
 }
 
 const linesOf = (doc) => (doc === '' ? [] : doc.split('\n'));
+
+/**
+ * If the rich body ever throws on some note, show that note in the classic
+ * editor instead of letting the error blank the whole app.
+ */
+class RichBodyBoundary extends Component {
+  constructor(props) {
+    super(props);
+    this.state = { failed: false };
+  }
+
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+
+  componentDidCatch(error) {
+    console.error('Rich editor failed; showing the classic editor for this note.', error);
+  }
+
+  render() {
+    return this.state.failed ? this.props.fallback : this.props.children;
+  }
+}
 
 function markdownFromRichNode(node) {
   if (node.nodeType === Node.TEXT_NODE) return node.textContent || '';
@@ -173,6 +197,7 @@ function RenderedBlock({ b, pal, doc, onDocChange, onWiki, images = {}, onDelete
   if (b.t === 'h2') return <h2 style={{ fontSize: '22px', fontWeight: 600, margin: '0 0 12px', letterSpacing: '-.01em', fontFamily: pal.headFont, color: pal.ink }}><Inline text={b.text} onWiki={onWiki} /></h2>;
   if (b.t === 'h3') return <h3 style={{ fontSize: '17.5px', fontWeight: 600, margin: '0 0 10px', fontFamily: pal.headFont, color: pal.ink }}><Inline text={b.text} onWiki={onWiki} /></h3>;
   if (b.t === 'hr') return <div style={{ borderTop: `1px solid ${pal.border}`, margin: '22px 0' }} />;
+  if (b.t === 'math') return <MathView tex={b.tex} display style={{ color: pal.ink, margin: '0 0 22px' }} />;
   if (b.t === 'p') return <p style={pStyle}><Inline text={b.text} onWiki={onWiki} /></p>;
   if (b.t === 'quote') {
     return (
@@ -243,8 +268,10 @@ export default function Editor({
   references = [],
   initialScrollTop = 0,
   onScroll,
+  richEditor = true,
 }) {
   const scrollRef = useRef(null);
+  const bodyApi = useRef(null);         // the rich body's insert commands, when it is mounted
   const taRef = useRef(null);
   const richRef = useRef(null);
   const imageInputRef = useRef(null);   // hidden file picker for image inserts
@@ -561,7 +588,9 @@ export default function Editor({
         const dataUrl = await fileToCompressedDataUrl(f);
         const id = newImageId();
         setImageData(id, dataUrl);
-        insertImageLine(id);
+        // the rich body inserts at the caret; the classic one after the edited block
+        if (richEditor && bodyApi.current) bodyApi.current.insertImage(id);
+        else insertImageLine(id);
       } catch (err) {
         alert(err.message || 'That image could not be added.');
       }
@@ -570,7 +599,8 @@ export default function Editor({
   };
 
   const onSheetPaste = (e) => {
-    if (!setImageData) return;
+    // the rich body handles its own pastes and drops, and marks them handled
+    if (!setImageData || e.defaultPrevented) return;
     const file = [...(e.clipboardData?.items || [])].find(it => it.type.startsWith('image/'))?.getAsFile();
     if (!file) return; // plain text pastes stay untouched
     e.preventDefault();
@@ -578,7 +608,7 @@ export default function Editor({
   };
 
   const onSheetDrop = (e) => {
-    if (!setImageData || !e.dataTransfer?.files?.length) return;
+    if (!setImageData || e.defaultPrevented || !e.dataTransfer?.files?.length) return;
     e.preventDefault();
     addImageFiles(e.dataTransfer.files);
   };
@@ -675,7 +705,8 @@ export default function Editor({
   };
 
   const handleGenBibliography = () => {
-    const currentText = focus ? draft : doc;
+    const drafting = focus && !richEditor;
+    const currentText = drafting ? draft : doc;
     const result = generateBibliography(currentText, references, bibliographyStyle);
     if (!result.cited) {
       alert('No citations (for example [@citekey]) were found in this note. Add citations first.');
@@ -683,7 +714,7 @@ export default function Editor({
     }
     const newText = result.text;
     if (newText !== currentText) {
-      if (focus) {
+      if (drafting) {
         setDraft(newText);
       } else {
         onDocChange(newText);
@@ -799,7 +830,7 @@ export default function Editor({
     if (b.t === 'h1') return { ...base, fontSize: '27px', fontWeight: 700, lineHeight: 1.4, fontFamily: pal.headFont, color: pal.ink, margin: '0 0 12px' };
     if (b.t === 'h2') return { ...base, fontSize: '22px', fontWeight: 600, lineHeight: 1.4, fontFamily: pal.headFont, color: pal.ink, margin: '0 0 12px' };
     if (b.t === 'h3') return { ...base, fontSize: '17.5px', fontWeight: 600, lineHeight: 1.5, fontFamily: pal.headFont, color: pal.ink, margin: '0 0 10px' };
-    if (b.t === 'code' || b.t === 'sketch') return { ...base, fontFamily: 'ui-monospace, Consolas, monospace', fontSize: '13px', lineHeight: 1.6 };
+    if (b.t === 'code' || b.t === 'sketch' || b.t === 'math') return { ...base, fontFamily: 'ui-monospace, Consolas, monospace', fontSize: '13px', lineHeight: 1.6 };
     return base;
   };
 
@@ -990,7 +1021,10 @@ export default function Editor({
                   <path d="M4 6h16M4 10h16M4 14h16M4 18h16" />
                 </svg>
               </div>
-              <div className={toolCls} title="Insert sketch block" onClick={onInsertSketch} style={iconBtn}>
+              <div
+                className={toolCls} title="Insert sketch block" style={iconBtn}
+                onClick={() => (richEditor && bodyApi.current ? bodyApi.current.insertSketch(onCreateSketch()) : onInsertSketch())}
+              >
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="14" rx="2" /><path d="M8 14l2.5-3 2 2.4L15.5 9l2.5 5" /></svg>
               </div>
               <div className={toolCls} title="Insert image — or paste a screenshot anywhere" onClick={() => imageInputRef.current?.click()} style={iconBtn}>
@@ -1047,12 +1081,31 @@ export default function Editor({
             </div>
           )}
 
-          {items}
-
-          <div
-            style={{ minHeight: blocks.length ? '120px' : '40vh', cursor: 'text' }}
-            onMouseDown={(e) => { e.preventDefault(); appendAtEnd(); }}
-          />
+          {(() => {
+            const classic = (
+              <>
+                {items}
+                <div
+                  style={{ minHeight: blocks.length ? '120px' : '40vh', cursor: 'text' }}
+                  onMouseDown={(e) => { e.preventDefault(); appendAtEnd(); }}
+                />
+              </>
+            );
+            if (!richEditor) return classic;
+            return (
+              <RichBodyBoundary fallback={classic}>
+                <NoteBody
+                  doc={doc} onDocChange={onDocChange} pal={pal} paper={paper} spell={spell} grid={grid}
+                  onWiki={onWiki} noteNames={files.filter(f => !f.folder).map(f => f.name)} references={references}
+                  images={images} setImageData={setImageData} sketches={sketches} setSketchData={setSketchData}
+                  onCreateSketch={onCreateSketch}
+                  onImageFiles={setImageData ? addImageFiles : null}
+                  onPickImage={() => imageInputRef.current?.click()}
+                  apiRef={bodyApi}
+                />
+              </RichBodyBoundary>
+            );
+          })()}
 
           {mentions.length > 0 && (
             <div style={{ borderTop: `1px solid ${pal.border}`, paddingTop: '16px', paddingBottom: '20px' }}>

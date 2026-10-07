@@ -1,4 +1,5 @@
-import { LAMPS, LAMP_LABEL } from '../lamp.js';
+import { ACCENTS, LAMPS, LAMP_LABEL, lampVars, normalizeAccent } from '../lamp.js';
+import { openRouterModel } from '../assistant.js';
 
 function Toggle({ on }) {
   return (
@@ -22,7 +23,7 @@ function Row({ title, sub, right, onClick, last }) {
 
 const SECTION = { fontSize: '11px', fontWeight: 600, letterSpacing: '.5px', textTransform: 'uppercase', color: '#5b6170', margin: '18px 0 2px' };
 
-export default function SettingsModal({ settings, setSettings, theme, setTheme, lamp, vault, onClose }) {
+export default function SettingsModal({ settings, setSettings, theme, setTheme, lamp, vault, onImportVault, onClose }) {
   const tog = (k) => () => setSettings(s => ({ ...s, [k]: !s[k] }));
 
   const exportVault = () => {
@@ -41,11 +42,8 @@ export default function SettingsModal({ settings, setSettings, theme, setTheme, 
       const data = JSON.parse(text);
       if (!Array.isArray(data.files) || typeof data.docs !== 'object') throw new Error('not a vault file');
       if (!window.confirm('Replace the current vault with the imported one? This overwrites your notes on this device.')) return;
-      localStorage.setItem('inkwell:v3', JSON.stringify({
-        files: data.files, docs: data.docs, sketches: data.sketches ?? {}, settings: data.settings, theme: data.theme,
-      }));
-      window.location.reload();
-    }).catch(() => window.alert('That file doesn\'t look like an Inkwell vault export.'));
+      return onImportVault?.(data);
+    }).catch(() => window.alert('That file doesn\'t look like an Inkwell vault export, or it could not be saved.'));
   };
 
   const actionBtn = {
@@ -62,13 +60,14 @@ export default function SettingsModal({ settings, setSettings, theme, setTheme, 
           <Row title="Local assistant" sub="Prefer Ollama (localhost:11434) over the free cloud model" right={<Toggle on={settings.localAi} />} onClick={tog('localAi')} />
           <Row title="Sync" sub="End-to-end encrypted, for sharing with friends" right={<Toggle on={settings.sync} />} onClick={tog('sync')} />
           <Row title="Spellcheck" sub="Underline unknown words while writing" right={<Toggle on={settings.spell} />} onClick={tog('spell')} />
+          <Row title="Rich editor" sub="Edit notes as formatted text; off shows the markdown behind each block" right={<Toggle on={settings.richEditor !== false} />} onClick={() => setSettings(s => ({ ...s, richEditor: s.richEditor === false }))} />
           <Row title="Vim keybindings" sub="For the brave" right={<Toggle on={settings.vim} />} onClick={tog('vim')} last />
 
           <div style={SECTION}>Assistant providers</div>
           <div style={{ padding: '11px 0', borderBottom: '1px solid #26292f' }}>
             <div style={{ fontSize: '13.5px', fontWeight: 500 }}>OpenRouter API key</div>
             <div style={{ fontSize: '12px', color: '#8b90a0', marginBottom: '8px' }}>
-              Free key from <a href="https://openrouter.ai/keys" target="_blank" rel="noreferrer" style={{ color: 'var(--acc)' }}>openrouter.ai/keys</a> — used for chat and deck design (model: {settings.openrouterModel || 'google/gemma-4-26b-a4b-it:free'}). Stays in this browser.
+              Free key from <a href="https://openrouter.ai/keys" target="_blank" rel="noreferrer" style={{ color: 'var(--acc)' }}>openrouter.ai/keys</a> — used for chat and deck design (model: {openRouterModel(settings.openrouterModel)}). Stays in this browser.
             </div>
             <input
               type="password"
@@ -79,23 +78,36 @@ export default function SettingsModal({ settings, setSettings, theme, setTheme, 
               style={{ width: '100%', background: '#16181d', border: '1px solid #2c2f37', borderRadius: '8px', padding: '8px 10px', color: '#dadde5', fontSize: '12.5px', outline: 'none' }}
             />
             <select
-              value={settings.openrouterModel || 'google/gemma-4-26b-a4b-it:free'}
+              value={openRouterModel(settings.openrouterModel)}
               onChange={(e) => setSettings(s => ({ ...s, openrouterModel: e.target.value }))}
               style={{ width: '100%', marginTop: '8px', background: '#16181d', border: '1px solid #2c2f37', borderRadius: '8px', padding: '8px 10px', color: '#dadde5', fontSize: '12.5px', outline: 'none' }}
             >
               <option value="google/gemma-4-26b-a4b-it:free">Gemma 4 26B (free · fastest)</option>
               <option value="google/gemma-4-31b-it:free">Gemma 4 31B (free · often rate-limited)</option>
-              <option value="meta-llama/llama-3.3-70b-instruct:free">Llama 3.3 70B (free)</option>
-              <option value="openai/gpt-oss-20b:free">GPT-OSS 20B (free · slow)</option>
+              <option value="google/gemma-4-26b-a4b-it">Gemma 4 26B (paid · ~$0.0004 per message, no daily cap)</option>
             </select>
           </div>
 
           <div style={SECTION}>Appearance</div>
-          {/* The accent picker is retired: the lamp owns --acc and --acc-page,
-              and each setting's pair is contrast-checked against its own
-              surfaces. A free-choice accent would break those guarantees
-              (teal on cream paper fails AA outright). Light is set with the
-              lamp control in the rail. */}
+          {/* Not a free colour: the lamp re-lights each hue to its own amber's
+              luminance at every setting (see accentTokens in lamp.js), so each
+              choice keeps amber's contrast on chrome and on paper. Swatches
+              show the hue as the current light renders it. */}
+          <Row title="Accent" sub="Links, tags and highlights — kept readable at every light" right={(
+            <div role="radiogroup" aria-label="Accent colour" style={{ display: 'flex', gap: '8px' }}>
+              {ACCENTS.map(({ id, label, hex }) => {
+                const on = normalizeAccent(theme.accent) === hex;
+                const shown = lampVars(lamp, hex)['--acc'];
+                return (
+                  <button
+                    key={id} type="button" role="radio" aria-checked={on} aria-label={label} title={label}
+                    onClick={() => setTheme(t => ({ ...t, accent: hex }))}
+                    style={{ width: '18px', height: '18px', borderRadius: '50%', border: 'none', padding: 0, background: shown, cursor: 'pointer', outline: on ? `2px solid ${shown}` : 'none', outlineOffset: '2px' }}
+                  />
+                );
+              })}
+            </div>
+          )} />
           <Row title="Light" sub={`${LAMP_LABEL[lamp] ?? 'Daylight'} — set with the lamp at the foot of the rail`} right={(
             <div style={{ display: 'flex', gap: '5px', alignItems: 'center' }}>
               {LAMPS.map(l => (

@@ -1,5 +1,5 @@
 // Note images: pasted/dropped screenshots stored as compressed data URLs in the
-// vault (localStorage), referenced from markdown as ![caption](img:<id>).
+// vault (the data layer, src/data/), referenced from markdown as ![caption](img:<id>).
 
 export const newImageId = () => 'img' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
 

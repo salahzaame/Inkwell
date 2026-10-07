@@ -2,6 +2,7 @@ import { useRef, useState } from 'react';
 import { paperIdOf } from '../highlights.js';
 import { findDuplicateCandidates, libraryBibtex, parseBibtex } from '../references.js';
 import { buildOpenAlexWorksUrl } from '../openalex.js';
+import { orderPdfCandidates } from '../pdf-sources.js';
 
 function reconstructAbstract(invertedIndex) {
   if (!invertedIndex) return '';
@@ -45,8 +46,11 @@ function authorsLine(ref) {
   return `${a.slice(0, 3).join(', ')}${a.length > 3 ? ' et al.' : ''}${ref.year ? ' · ' + ref.year : ''}`;
 }
 
-function QueueCard({ refItem, hlCount, isContinue, onOpenPaper, onSetStatus, onSetTags, onOpenNote, onCopyKey }) {
+function QueueCard({ refItem, hlCount, isContinue, onOpenPaper, onAttachPdf, onSetStatus, onSetTags, onOpenNote, onCopyKey }) {
   const pid = paperIdOf(refItem);
+  // a web copy, or a PDF the reader attached (from a publisher that blocks apps, or her library)
+  const readable = Boolean(refItem.pdfUrl || refItem.hasLocalPdf);
+  const attachRef = useRef(null);
   const status = refItem.status || 'toread';
   const [tagDraft, setTagDraft] = useState('');
   const tags = refItem.tags || [];
@@ -65,8 +69,8 @@ function QueueCard({ refItem, hlCount, isContinue, onOpenPaper, onSetStatus, onS
       )}
       <div
         className="q-title"
-        onClick={() => (refItem.pdfUrl ? onOpenPaper(refItem) : onOpenNote(refItem))}
-        title={refItem.pdfUrl ? 'Open the paper' : 'Open the note (no open-access PDF found)'}
+        onClick={() => (readable ? onOpenPaper(refItem) : onOpenNote(refItem))}
+        title={readable ? 'Open the paper' : 'Open the note (no open-access PDF found)'}
       >
         {refItem.title}
       </div>
@@ -106,7 +110,20 @@ function QueueCard({ refItem, hlCount, isContinue, onOpenPaper, onSetStatus, onS
             @
           </button>
         )}
-        {refItem.pdfUrl && (
+        {!readable && onAttachPdf && (
+          <>
+            <input
+              ref={attachRef} type="file" accept="application/pdf,.pdf" style={{ display: 'none' }}
+              onChange={(e) => { const f = e.target.files?.[0]; if (f) onAttachPdf(refItem, f); e.target.value = ''; }}
+            />
+            <button
+              onClick={() => attachRef.current?.click()}
+              title="No free copy online. If you have the PDF (from your library, or the publisher's site), attach it and Inkwell keeps it with this paper."
+              style={{ border: '1px dashed var(--line-2)', background: 'transparent', color: 'var(--ink-2)', cursor: 'pointer', padding: '3px 9px', borderRadius: '6px', fontSize: '11.5px', fontWeight: 600 }}
+            >Attach PDF</button>
+          </>
+        )}
+        {readable && (
           <button
             onClick={() => onOpenPaper(refItem)}
             style={{ border: 'none', background: 'color-mix(in oklab, var(--acc) 15%, transparent)', color: 'var(--acc)', cursor: 'pointer', padding: '4px 10px', borderRadius: '6px', fontSize: '11.5px', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '5px' }}
@@ -123,7 +140,7 @@ function QueueCard({ refItem, hlCount, isContinue, onOpenPaper, onSetStatus, onS
 export default function ResearchPanel({
   references, highlights = {},
   savedSearches = [], onSaveSearch, onRemoveSavedSearch,
-  onImportReference, onImportBibtex, onOpenPaper, onSetStatus, onSetTags, onOpenNote, onLocalPdf, onCreateSynthesis, onCreateEvidenceMatrix, onAskAssistant, onClose,
+  onImportReference, onImportBibtex, onOpenPaper, onAttachPdf, onSetStatus, onSetTags, onOpenNote, onLocalPdf, onCreateSynthesis, onCreateEvidenceMatrix, onAskAssistant, onClose,
 }) {
   const [tab, setTab] = useState(references.length > 0 ? 'queue' : 'search');
   const [query, setQuery] = useState('');
@@ -167,6 +184,8 @@ export default function ResearchPanel({
         addPdf(w.primary_location?.pdf_url);
         for (const loc of w.locations || []) addPdf(loc?.pdf_url);
         addPdf(w.open_access?.oa_url);
+        const ordered = orderPdfCandidates(pdfCandidates);
+        pdfCandidates.splice(0, pdfCandidates.length, ...ordered);
         const pdfUrl = pdfCandidates[0] || '';
         const authors = (w.authorships || []).map(a => a.author?.display_name).filter(Boolean);
         const abstract = reconstructAbstract(w.abstract_inverted_index);
@@ -243,7 +262,7 @@ export default function ResearchPanel({
   };
 
   return (
-    <div className="side-panel" style={{ width: '330px', borderRight: '1px solid var(--line)' }}>
+    <div className="side-panel" style={{ width: '100%', borderRight: '1px solid var(--line)' }}>
       <div className="panel-header">
         <span className="panel-title">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--acc)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20M4 19.5A2.5 2.5 0 0 0 6.5 22H20M4 19.5v-15A2.5 2.5 0 0 1 6.5 2M20 4v18" /><path d="M6 6h10M6 10h10" /></svg>
@@ -492,7 +511,7 @@ export default function ResearchPanel({
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
                     {reading.map((r, i) => (
                       <QueueCard key={paperIdOf(r)} refItem={r} hlCount={hlCount(r)} isContinue={i === 0}
-                        onOpenPaper={onOpenPaper} onSetStatus={onSetStatus} onSetTags={onSetTags} onOpenNote={onOpenNote} onCopyKey={copyKey} />
+                        onOpenPaper={onOpenPaper} onAttachPdf={onAttachPdf} onSetStatus={onSetStatus} onSetTags={onSetTags} onOpenNote={onOpenNote} onCopyKey={copyKey} />
                     ))}
                   </div>
                 </>
@@ -503,7 +522,7 @@ export default function ResearchPanel({
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
                     {toread.map(r => (
                       <QueueCard key={paperIdOf(r)} refItem={r} hlCount={hlCount(r)}
-                        onOpenPaper={onOpenPaper} onSetStatus={onSetStatus} onSetTags={onSetTags} onOpenNote={onOpenNote} onCopyKey={copyKey} />
+                        onOpenPaper={onOpenPaper} onAttachPdf={onAttachPdf} onSetStatus={onSetStatus} onSetTags={onSetTags} onOpenNote={onOpenNote} onCopyKey={copyKey} />
                     ))}
                   </div>
                 </>
@@ -514,7 +533,7 @@ export default function ResearchPanel({
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
                     {done.map(r => (
                       <QueueCard key={paperIdOf(r)} refItem={r} hlCount={hlCount(r)}
-                        onOpenPaper={onOpenPaper} onSetStatus={onSetStatus} onSetTags={onSetTags} onOpenNote={onOpenNote} onCopyKey={copyKey} />
+                        onOpenPaper={onOpenPaper} onAttachPdf={onAttachPdf} onSetStatus={onSetStatus} onSetTags={onSetTags} onOpenNote={onOpenNote} onCopyKey={copyKey} />
                     ))}
                   </div>
                 </>
